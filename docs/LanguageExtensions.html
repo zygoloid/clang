@@ -96,6 +96,7 @@
 </li>
 <li><a href="#overloading-in-c">Function Overloading in C</a></li>
 <li><a href="#complex-list-init">Initializer lists for complex numbers in C</a></li>
+<li><a href="#constant_expressions">Constant expressions</a></li>
 <li><a href="#builtins">Builtin Functions</a>
   <ul>
   <li><a href="#__builtin_shufflevector">__builtin_shufflevector</a></li>
@@ -1336,6 +1337,76 @@ complex float x[] = { 1.0f, 1.0f }; // [0] = (1, 0), [1] = (1, 0)
     apply to the C++ <code>std::complex</code>.  (In C++11, list
     initialization allows the same syntax to be used with
     <code>std::complex</code> with the same meaning.)
+
+<!-- ======================================================================= -->
+<h2 id="constant_expressions">Constant expressions</h2>
+<!-- ======================================================================= -->
+
+<p>Clang supports the constant expression semantics defined by the C and C++
+standards. In addition, as permitted by those standards, many other forms of
+expression are constant-folded when used as the initializer of a variable with
+static storage duration.</p>
+
+<p><b>GNU constant expression extensions:</b></p>
+
+<p>For GCC compatibility, Clang allows a folded constant to be used in some
+situations where the relevant language standard requires an integer constant
+expression. These situations are:</p>
+
+<ul>
+  <li>an array bound</li>
+  <li>an array designator</li>
+  <li>the bit-width of a bit-field</li>
+  <li>a case label, outside C++11</li>
+  <li>the value of an enumerator, outside C++11</li>
+</ul>
+
+<p>This behaviour can be disabled with the <tt>-pedantic-errors</tt> argument.
+Additionally, as part of the GNU <tt>__builtin_constant_p</tt> extension, in an
+expression of the form <tt>__builtin_constant_p(a) ? b : c</tt>, expressions
+<tt>b</tt> and <tt>c</tt> are constant-folded, even in contexts where a
+language-standard-conforming constant expression is usually required.</p>
+
+<p><b>C++11 <tt>constexpr</tt> extensions:</b></p>
+
+<p>In C++11 mode, Clang supports several extensions to constant expression
+evaluation. These extensions produce errors by default, which can be suppressed
+with the <tt>-Wno-pedantic-constexpr</tt> argument. The extensions are:
+
+<ul>
+  <li>Non-literal types are allowed to have <tt>constexpr</tt> member
+    functions.</li>
+  <li>Non-<tt>static</tt> variables are allowed to be defined in
+    <tt>constexpr</tt> functions.</li>
+  <li><tt>static</tt> variables are allowed to be defined in
+    <tt>constexpr</tt> functions, if they are initialized by constant
+    expressions.</li>
+  <li><tt>if</tt> statements are allowed in <tt>constexpr</tt> functions.</li>
+  <li>Compound-statements are allowed in <tt>constexpr</tt> functions.</li>
+  <li>Expression-statements are allowed in <tt>constexpr</tt> functions, but
+    (since operations with side-effects are not allowed) can only have the
+    effect of causing a constant evaluation to fail.</li>
+</ul>
+
+<p><b>Examples:</b></p>
+
+<pre>
+  constexpr int factorial(int a) {
+    static const int cutoff = 13;
+
+    if (a < 0) {
+      throw "factorial of negative number";
+    } else if (a < 2) {
+      return 1;
+    } else if (a > cutoff) {
+      throw "factorial would overflow";
+    }
+
+    int prev_fac = factorial(a - 1);
+    return a * prev_fac;
+  }
+  static_assert(factorial(5) == 120, "");
+</pre>
 
 <!-- ======================================================================= -->
 <h2 id="builtins">Builtin Functions</h2>

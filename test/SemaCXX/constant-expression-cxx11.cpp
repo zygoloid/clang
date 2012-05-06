@@ -1258,3 +1258,10 @@ namespace InvalidClasses {
     auto& b = y.b;
   }
 }
+
+namespace NamespaceAlias {
+  constexpr int f() {
+    namespace NS = NamespaceAlias; // expected-error {{not allowed in constexpr function}}
+    return &NS::f != nullptr;
+  }
+}

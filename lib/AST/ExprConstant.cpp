@@ -287,7 +287,7 @@ namespace {
     /// parameters' function scope indices.
     const APValue *Arguments;
 
-    typedef llvm::DenseMap<const Expr*, APValue> MapTy;
+    typedef llvm::DenseMap<const void*, APValue> MapTy;
     typedef MapTy::const_iterator temp_iterator;
     /// Temporaries - Temporary lvalues materialized within this stack frame.
     MapTy Temporaries;
@@ -897,6 +897,14 @@ static bool EvaluateComplex(const Expr *E, ComplexValue &Res, EvalInfo &Info);
 // Misc utilities
 //===----------------------------------------------------------------------===//
 
+/// Evaluate an expression to see if it had side-effects, and discard its
+/// result.
+static void EvaluateIgnoredValue(EvalInfo &Info, const Expr *E) {
+  APValue Scratch;
+  if (!Evaluate(Scratch, Info, E))
+    Info.EvalStatus.HasSideEffects = true;
+}
+
 /// Should this call expression be treated as a string literal?
 static bool IsStringLiteralCall(const CallExpr *E) {
   unsigned Builtin = E->isBuiltinCall();
@@ -1438,6 +1446,15 @@ static bool EvaluateVarDeclInit(EvalInfo &Info, const Expr *E,
     return true;
   }
 
+  // If this is a local variable, dig out its value.
+  if (VD->hasLocalStorage() && Frame && Frame->Index > 1) {
+    Result = Frame->Temporaries[VD];
+    // If we've carried on past an unevaluatable local variable initializer,
+    // we can't go any further. This can happen during potential constant
+    // expression checking.
+    return !Result.isUninit();
+  }
+
   // Dig out the initializer, and use the declaration which it's attached to.
   const Expr *Init = VD->getAnyInitializer(VD);
   if (!Init || Init->isValueDependent()) {
@@ -1780,7 +1797,9 @@ static bool HandleLValueToRValueConversion(EvalInfo &Info, const Expr *Conv,
       return false;
     }
 
-    if (!isa<ParmVarDecl>(VD)) {
+    // Unless we're looking at a local variable or argument in a constexpr call,
+    // the variable we're reading must be const.
+    if (LVal.CallIndex <= 1 || !VD->hasLocalStorage()) {
       if (VD->isConstexpr()) {
         // OK, we can read this variable.
       } else if (VT->isIntegralOrEnumerationType()) {
@@ -2037,20 +2056,61 @@ enum EvalStmtResult {
 };
 }
 
+static bool EvaluateDecl(EvalInfo &Info, const Decl *D) {
+  if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+    // We don't need to evaluate the initializer for a static local.
+    if (!VD->hasLocalStorage())
+      return true;
+
+    LValue Result;
+    Result.set(VD, Info.CurrentCall->Index);
+    APValue &Val = Info.CurrentCall->Temporaries[VD];
+
+    if (!EvaluateInPlace(Val, Info, Result, VD->getInit())) {
+      // Wipe out any partially-computed value, to allow tracking that this
+      // evaluation failed.
+      Val = APValue();
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Evaluate a statement.
 static EvalStmtResult EvaluateStmt(APValue &Result, EvalInfo &Info,
                                    const Stmt *S) {
+  // FIXME: Mark all temporaries in the current frame as destroyed at
+  // the end of each full-expression.
   switch (S->getStmtClass()) {
   default:
+    if (const Expr *E = dyn_cast<Expr>(S)) {
+      EvaluateIgnoredValue(Info, E);
+      // Don't bother evaluating beyond an expression-statement which couldn't
+      // be evaluated.
+      if (Info.EvalStatus.HasSideEffects && !Info.keepEvaluatingAfterFailure())
+        return ESR_Failed;
+      return ESR_Succeeded;
+    }
+
+    Info.Diag(S->getLocStart());
     return ESR_Failed;
 
   case Stmt::NullStmtClass:
-  case Stmt::DeclStmtClass:
     return ESR_Succeeded;
+
+  case Stmt::DeclStmtClass: {
+    const DeclStmt *DS = cast<DeclStmt>(S);
+    for (DeclStmt::const_decl_iterator DclIt = DS->decl_begin(),
+           DclEnd = DS->decl_end(); DclIt != DclEnd; ++DclIt)
+      if (!EvaluateDecl(Info, *DclIt) && !Info.keepEvaluatingAfterFailure())
+        return ESR_Failed;
+    return ESR_Succeeded;
+  }
 
   case Stmt::ReturnStmtClass: {
     const Expr *RetExpr = cast<ReturnStmt>(S)->getRetValue();
-    if (!Evaluate(Result, Info, RetExpr))
+    if (RetExpr && !Evaluate(Result, Info, RetExpr))
       return ESR_Failed;
     return ESR_Returned;
   }
@@ -2060,6 +2120,28 @@ static EvalStmtResult EvaluateStmt(APValue &Result, EvalInfo &Info,
     for (CompoundStmt::const_body_iterator BI = CS->body_begin(),
            BE = CS->body_end(); BI != BE; ++BI) {
       EvalStmtResult ESR = EvaluateStmt(Result, Info, *BI);
+      if (ESR != ESR_Succeeded)
+        return ESR;
+    }
+    return ESR_Succeeded;
+  }
+
+  case Stmt::IfStmtClass: {
+    const IfStmt *IS = cast<IfStmt>(S);
+
+    // Evaluate the condition, as either a var decl or as an expression.
+    bool Cond;
+    if (VarDecl *CondDecl = IS->getConditionVariable()) {
+      if (!EvaluateDecl(Info, CondDecl))
+        return ESR_Failed;
+      if (!HandleConversionToBool(Info.CurrentCall->Temporaries[CondDecl],
+                                  Cond))
+        return ESR_Failed;
+    } else if (!EvaluateAsBooleanCondition(IS->getCond(), Cond, Info))
+      return ESR_Failed;
+
+    if (const Stmt *SubStmt = Cond ? IS->getThen() : IS->getElse()) {
+      EvalStmtResult ESR = EvaluateStmt(Result, Info, SubStmt);
       if (ESR != ESR_Succeeded)
         return ESR;
     }
@@ -2158,7 +2240,10 @@ static bool HandleFunctionCall(SourceLocation CallLoc,
     return false;
 
   CallStackFrame Frame(Info, CallLoc, Callee, This, ArgValues.data());
-  return EvaluateStmt(Result, Info, Body) == ESR_Returned;
+  EvalStmtResult ESR = EvaluateStmt(Result, Info, Body);
+  if (ESR == ESR_Succeeded)
+    Info.Diag(Callee->getLocEnd(), diag::note_constexpr_no_return);
+  return ESR == ESR_Returned;
 }
 
 /// Evaluate a constructor call.
@@ -2184,7 +2269,9 @@ static bool HandleConstructorCall(SourceLocation CallLoc, const LValue &This,
   // If it's a delegating constructor, just delegate.
   if (Definition->isDelegatingConstructor()) {
     CXXConstructorDecl::init_const_iterator I = Definition->init_begin();
-    return EvaluateInPlace(Result, Info, This, (*I)->getInit());
+    if (!EvaluateInPlace(Result, Info, This, (*I)->getInit()))
+      return false;
+    return EvaluateStmt(Result, Info, Definition->getBody()) != ESR_Failed;
   }
 
   // For a trivial copy or move constructor, perform an APValue copy. This is
@@ -2284,7 +2371,8 @@ static bool HandleConstructorCall(SourceLocation CallLoc, const LValue &This,
     }
   }
 
-  return Success;
+  return Success &&
+         EvaluateStmt(Result, Info, Definition->getBody()) != ESR_Failed;
 }
 
 namespace {
@@ -2735,9 +2823,7 @@ public:
 
   /// Visit a value which is evaluated, but whose value is ignored.
   void VisitIgnoredValue(const Expr *E) {
-    APValue Scratch;
-    if (!Evaluate(Scratch, Info, E))
-      Info.EvalStatus.HasSideEffects = true;
+    EvaluateIgnoredValue(Info, E);
   }
 };
 
@@ -2943,7 +3029,7 @@ bool LValueExprEvaluator::VisitDeclRefExpr(const DeclRefExpr *E) {
 
 bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
   if (!VD->getType()->isReferenceType()) {
-    if (isa<ParmVarDecl>(VD)) {
+    if (VD->hasLocalStorage() && Info.CurrentCall->Index > 1) {
       Result.set(VD, Info.CurrentCall->Index);
       return true;
     }
