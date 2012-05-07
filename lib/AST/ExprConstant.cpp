@@ -2350,8 +2350,10 @@ public:
     
   // Has side effects if any element does.
   bool VisitInitListExpr(const InitListExpr *E) {
+    // FIXME: An in-class initializer (null init) doesn't necessarily have
+    //        side-effects.
     for (unsigned i = 0, e = E->getNumInits(); i != e; ++i)
-      if (Visit(E->getInit(i))) return true;
+      if (!E->getInit(i) || Visit(E->getInit(i))) return true;
     if (const Expr *filler = E->getArrayFiller())
       return Visit(filler);
     return false;
@@ -3510,10 +3512,23 @@ bool RecordExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
     ImplicitValueInitExpr VIE(Field->getType());
     const Expr *InitExpr = E->getNumInits() ? E->getInit(0) : &VIE;
 
+    const LValue *OldThis = Info.CurrentCall->This;
+    if (!InitExpr) {
+      assert(Field->hasInClassInitializer());
+      InitExpr = Field->getInClassInitializer();
+      Info.CurrentCall->This = &This;
+    }
+
     LValue Subobject = This;
     if (!HandleLValueMember(Info, InitExpr, Subobject, Field, &Layout))
       return false;
-    return EvaluateInPlace(Result.getUnionValue(), Info, Subobject, InitExpr);
+
+    bool Success = EvaluateInPlace(Result.getUnionValue(), Info,
+                                   Subobject, InitExpr);
+
+    Info.CurrentCall->This = OldThis;
+
+    return Success;
   }
 
   assert((!isa<CXXRecordDecl>(RD) || !cast<CXXRecordDecl>(RD)->getNumBases()) &&
@@ -3533,23 +3548,31 @@ bool RecordExprEvaluator::VisitInitListExpr(const InitListExpr *E) {
 
     bool HaveInit = ElementNo < E->getNumInits();
 
-    // FIXME: Diagnostics here should point to the end of the initializer
-    // list, not the start.
-    if (!HandleLValueMember(Info, HaveInit ? E->getInit(ElementNo) : E,
-                            Subobject, &*Field, &Layout))
-      return false;
-
     // Perform an implicit value-initialization for members beyond the end of
     // the initializer list.
     ImplicitValueInitExpr VIE(HaveInit ? Info.Ctx.IntTy : Field->getType());
 
-    if (!EvaluateInPlace(
-          Result.getStructField(Field->getFieldIndex()),
-          Info, Subobject, HaveInit ? E->getInit(ElementNo++) : &VIE)) {
-      if (!Info.keepEvaluatingAfterFailure())
-        return false;
-      Success = false;
+    const LValue *OldThis = Info.CurrentCall->This;
+    const Expr *Init = HaveInit ? E->getInit(ElementNo++) : &VIE;
+    if (!Init) {
+      assert(Field->hasInClassInitializer());
+      Init = Field->getInClassInitializer();
+      Info.CurrentCall->This = &This;
     }
+
+    // FIXME: Diagnostics in the !HaveInit case should point to the end of
+    // the initializer list, not the start.
+    if (!HandleLValueMember(Info, Init, Subobject, &*Field, &Layout))
+      return false;
+
+    Success &= EvaluateInPlace(
+        Result.getStructField(Field->getFieldIndex()),
+        Info, Subobject, Init);
+
+    Info.CurrentCall->This = OldThis;
+
+    if (!Success && !Info.keepEvaluatingAfterFailure())
+      return false;
   }
 
   return Success;

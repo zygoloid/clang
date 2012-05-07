@@ -968,8 +968,16 @@ void AggExprEmitter::VisitInitListExpr(InitListExpr *E) {
 
     LValue FieldLoc = CGF.EmitLValueForFieldInitialization(DestLV, Field);
     if (NumInitElements) {
-      // Store the initializer into the field
-      EmitInitializationToLValue(E->getInit(0), FieldLoc);
+      if (Expr *Init = E->getInit(0)) {
+        // Store the initializer into the field
+        EmitInitializationToLValue(Init, FieldLoc);
+      } else {
+        // Emit the in-class initializer. In this expression, 'this' refers
+        // to the object being initialized.
+        assert(Field->hasInClassInitializer() && "missing init for field");
+        CodeGenFunction::CXXThisOverride ThisOverride(CGF, DestLV.getAddress());
+        EmitInitializationToLValue(Field->getInClassInitializer(), FieldLoc);
+      }
     } else {
       // Default-initialize to null.
       EmitNullInitializationToLValue(FieldLoc);
@@ -1010,8 +1018,16 @@ void AggExprEmitter::VisitInitListExpr(InitListExpr *E) {
     LV.setNonGC(true);
     
     if (curInitIndex < NumInitElements) {
-      // Store the initializer into the field.
-      EmitInitializationToLValue(E->getInit(curInitIndex++), LV);
+      if (Expr *Init = E->getInit(curInitIndex++)) {
+        // Store the initializer into the field.
+        EmitInitializationToLValue(Init, LV);
+      } else {
+        // Emit the in-class initializer. In this expression, 'this' refers
+        // to the object being initialized.
+        assert(field->hasInClassInitializer() && "missing init for field");
+        CodeGenFunction::CXXThisOverride ThisOverride(CGF, DestLV.getAddress());
+        EmitInitializationToLValue(field->getInClassInitializer(), LV);
+      }
     } else {
       // We're out of initalizers; default-initialize to null
       EmitNullInitializationToLValue(LV);
@@ -1058,6 +1074,25 @@ void AggExprEmitter::VisitInitListExpr(InitListExpr *E) {
 //                        Entry Points into this File
 //===----------------------------------------------------------------------===//
 
+static CharUnits GetNumNonZeroBytesInInit(const Expr *E, CodeGenFunction &CGF);
+
+/// GetNumNonZeroBytesInFieldInit - Get an approximate count of the number of
+/// non-zero bytes that will be stored when initializing Field with E.
+static CharUnits GetNumNonZeroBytesInFieldInit(const FieldDecl *Field,
+                                               const Expr *E,
+                                               CodeGenFunction &CGF) {
+  // Reference values are always non-null and have the width of a pointer.
+  if (Field->getType()->isReferenceType())
+    return CGF.getContext().toCharUnitsFromBits(
+        CGF.getContext().getTargetInfo().getPointerWidth(0));
+
+  // A null expression indicates that the in-class initializer should be used.
+  if (!E)
+    return GetNumNonZeroBytesInInit(Field->getInClassInitializer(), CGF);
+
+  return GetNumNonZeroBytesInInit(E, CGF);
+}
+
 /// GetNumNonZeroBytesInInit - Get an approximate count of the number of
 /// non-zero bytes that will be stored when outputting the initializer for the
 /// specified initializer expression.
@@ -1077,33 +1112,32 @@ static CharUnits GetNumNonZeroBytesInInit(const Expr *E, CodeGenFunction &CGF) {
   // reference members, we need to consider the size of the reference, not the
   // referencee.  InitListExprs for unions and arrays can't have references.
   if (const RecordType *RT = E->getType()->getAs<RecordType>()) {
-    if (!RT->isUnionType()) {
-      RecordDecl *SD = E->getType()->getAs<RecordType>()->getDecl();
-      CharUnits NumNonZeroBytes = CharUnits::Zero();
-      
-      unsigned ILEElement = 0;
-      for (RecordDecl::field_iterator Field = SD->field_begin(),
-           FieldEnd = SD->field_end(); Field != FieldEnd; ++Field) {
-        // We're done once we hit the flexible array member or run out of
-        // InitListExpr elements.
-        if (Field->getType()->isIncompleteArrayType() ||
-            ILEElement == ILE->getNumInits())
-          break;
-        if (Field->isUnnamedBitfield())
-          continue;
+    if (RT->isUnionType()) {
+      if (const FieldDecl *Field = ILE->getInitializedFieldInUnion())
+        return GetNumNonZeroBytesInFieldInit(Field, ILE->getInit(0), CGF);
 
-        const Expr *E = ILE->getInit(ILEElement++);
-        
-        // Reference values are always non-null and have the width of a pointer.
-        if (Field->getType()->isReferenceType())
-          NumNonZeroBytes += CGF.getContext().toCharUnitsFromBits(
-              CGF.getContext().getTargetInfo().getPointerWidth(0));
-        else
-          NumNonZeroBytes += GetNumNonZeroBytesInInit(E, CGF);
-      }
-      
-      return NumNonZeroBytes;
+      return CharUnits::Zero();
     }
+
+    RecordDecl *SD = RT->getDecl();
+    CharUnits NumNonZeroBytes = CharUnits::Zero();
+
+    unsigned ILEElement = 0;
+    for (RecordDecl::field_iterator Field = SD->field_begin(),
+         FieldEnd = SD->field_end(); Field != FieldEnd; ++Field) {
+      // We're done once we hit the flexible array member or run out of
+      // InitListExpr elements.
+      if (Field->getType()->isIncompleteArrayType() ||
+          ILEElement == ILE->getNumInits())
+        break;
+      if (Field->isUnnamedBitfield())
+        continue;
+
+      const Expr *Init = ILE->getInit(ILEElement++);
+      NumNonZeroBytes += GetNumNonZeroBytesInFieldInit(&*Field, Init, CGF);
+    }
+
+    return NumNonZeroBytes;
   }
   
   

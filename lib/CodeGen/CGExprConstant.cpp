@@ -406,11 +406,12 @@ bool ConstStructBuilder::Build(InitListExpr *ILE) {
     // Get the initializer.  A struct can include fields without initializers,
     // we just use explicit null values for them.
     llvm::Constant *EltInit;
-    if (ElementNo < ILE->getNumInits())
-      EltInit = CGM.EmitConstantExpr(ILE->getInit(ElementNo++),
-                                     Field->getType(), CGF);
-    else
+    if (ElementNo >= ILE->getNumInits())
       EltInit = CGM.EmitNullConstant(Field->getType());
+    else if (const Expr *Init = ILE->getInit(ElementNo++))
+      EltInit = CGM.EmitConstantExpr(Init, Field->getType(), CGF);
+    else
+      EltInit = 0; // Can't evaluate in-class initializers here.
 
     if (!EltInit)
       return false;

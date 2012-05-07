@@ -965,6 +965,24 @@ public:
     }
   };
 
+  /// An RAII object to temporarily override the value of 'this'.
+  class CXXThisOverride {
+    CodeGenFunction &CGF;
+
+    /// The value of 'this' prior to the override.
+    llvm::Value *OldThis;
+
+  public:
+    CXXThisOverride(CodeGenFunction &CGF, llvm::Value *NewThis)
+      : CGF(CGF), OldThis(CGF.CXXThisValue) {
+      CGF.CXXThisValue = NewThis;
+    }
+
+    ~CXXThisOverride() {
+      CGF.CXXThisValue = OldThis;
+    }
+  };
+
   /// An object which temporarily prevents a value from being
   /// destroyed by aggressive peephole optimizations that assume that
   /// all uses of a value have been realized in the IR.

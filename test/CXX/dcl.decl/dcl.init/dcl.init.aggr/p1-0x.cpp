@@ -30,10 +30,11 @@ struct NonAggr1b {
 NonAggr1b na1b = { 42 }; // expected-error {{no matching constructor for initialization of 'NonAggr1b'}}
 
 // no brace-or-equal-initializers for non-static data members, ...
-struct NonAggr2 { // expected-note 3 {{candidate constructor}}
+// FIXME: Update this once the new wording is standardized.
+struct Aggr2 {
   int m = { 123 };
 };
-NonAggr2 na2 = { 42 }; // expected-error {{no matching constructor for initialization of 'NonAggr2'}}
+Aggr2 na2 = { 42 };
 
 // no private...
 struct NonAggr3 { // expected-note 3 {{candidate constructor}}

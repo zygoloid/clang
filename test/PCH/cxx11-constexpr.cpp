@@ -5,12 +5,14 @@
 
 #define HEADER_INCLUDED
 
+struct A {};
+
 struct B {
   B(); // expected-note {{here}}
   constexpr B(char) {}
 };
 
-struct C { // expected-note {{not an aggregate and has no constexpr constructors}}
+struct C : A { // expected-note {{not an aggregate and has no constexpr constructors}}
   B b;
   double d = 0.0;
 };

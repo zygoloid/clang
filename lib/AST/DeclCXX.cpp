@@ -826,11 +826,6 @@ NotASpecialMember:;
       //   of its class has a brace-or-equal-initializer.
       data().HasTrivialDefaultConstructor = false;
 
-      // C++11 [dcl.init.aggr]p1:
-      //   An aggregate is a [...] class with [...] no
-      //   brace-or-equal-initializers for non-static data members.
-      data().Aggregate = false;
-
       // C++11 [class]p10:
       //   A POD struct is [...] a trivial class.
       data().PlainOldData = false;
