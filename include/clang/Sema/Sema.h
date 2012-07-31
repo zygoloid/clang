@@ -182,7 +182,8 @@ namespace sema {
 
 // FIXME: No way to easily map from TemplateTypeParmTypes to
 // TemplateTypeParmDecls, so we have this horrible PointerUnion.
-typedef std::pair<llvm::PointerUnion<const TemplateTypeParmType*, NamedDecl*>,
+typedef std::pair<llvm::PointerUnion3<const TemplateTypeParmType*,
+                                      NamedDecl*, UnaryOperator*>,
                   SourceLocation> UnexpandedParameterPack;
 
 /// Sema - This implements semantic analysis and AST building for C.

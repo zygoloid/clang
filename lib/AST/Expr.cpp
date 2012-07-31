@@ -884,6 +884,7 @@ const char *UnaryOperator::getOpcodeStr(Opcode Op) {
   case UO_Real:    return "__real";
   case UO_Imag:    return "__imag";
   case UO_Extension: return "__extension__";
+  case UO_Pack:    return "...";
   }
   llvm_unreachable("Unknown unary operator");
 }
@@ -913,6 +914,7 @@ OverloadedOperatorKind UnaryOperator::getOverloadedOperator(Opcode Opc) {
   case UO_Minus: return OO_Minus;
   case UO_Not: return OO_Tilde;
   case UO_LNot: return OO_Exclaim;
+  //case UO_Pack: return OO_Pack; // TODO
   default: return OO_None;
   }
 }
@@ -1647,6 +1649,7 @@ OverloadedOperatorKind BinaryOperator::getOverloadedOperator(Opcode Opc) {
     OO_Star, OO_Slash, OO_Percent,
     OO_Plus, OO_Minus,
     OO_LessLess, OO_GreaterGreater,
+    /* ... cannot be overloaded */OO_None,
     OO_Less, OO_Greater, OO_LessEqual, OO_GreaterEqual,
     OO_EqualEqual, OO_ExclaimEqual,
     OO_Amp,
@@ -1818,6 +1821,7 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     case UO_Not:
     case UO_LNot:
     case UO_Deref:
+    case UO_Pack:
       break;
     case UO_PostInc:
     case UO_PostDec:

@@ -1545,10 +1545,10 @@ public:
                 ExprValueKind VK, ExprObjectKind OK, SourceLocation l)
     : Expr(UnaryOperatorClass, type, VK, OK,
            input->isTypeDependent() || type->isDependentType(),
-           input->isValueDependent(),
+           input->isValueDependent() || opc == UO_Pack,
            (input->isInstantiationDependent() ||
-            type->isInstantiationDependentType()),
-           input->containsUnexpandedParameterPack()),
+            type->isInstantiationDependentType() || opc == UO_Pack),
+           input->containsUnexpandedParameterPack() || opc == UO_Pack),
       Opc(opc), Loc(l), Val(input) {}
 
   /// \brief Build an empty unary operator.

@@ -87,6 +87,12 @@ namespace {
       return inherited::TraverseTemplateName(Template);
     }
 
+    /// \brief Record occurrences of pack expressions.
+    bool VisitUnaryPack(UnaryOperator *UO) {
+      Unexpanded.push_back(std::make_pair(UO, UO->getExprLoc()));
+      return true;
+    }
+
     /// \brief Suppress traversal into Objective-C container literal
     /// elements that are pack expansions.
     bool TraverseObjCDictionaryLiteral(ObjCDictionaryLiteral *E) {
@@ -222,8 +228,8 @@ Sema::DiagnoseUnexpandedParameterPacks(SourceLocation Loc,
     if (const TemplateTypeParmType *TTP
           = Unexpanded[I].first.dyn_cast<const TemplateTypeParmType *>())
       Name = TTP->getIdentifier();
-    else
-      Name = Unexpanded[I].first.get<NamedDecl *>()->getIdentifier();
+    else if (const NamedDecl *ND = Unexpanded[I].first.dyn_cast<NamedDecl *>())
+      Name = ND->getIdentifier();
 
     if (Name && NamesKnown.insert(Name))
       Names.push_back(Name);
@@ -526,6 +532,15 @@ getDepthAndIndex(NamedDecl *ND) {
   return std::make_pair(TTP->getDepth(), TTP->getIndex());
 }
 
+static unsigned getNumArgumentsInPackExpression(ASTContext &Context,
+                                                UnaryOperator *UO) {
+  assert(UO->getOpcode() == UO_Pack);
+  llvm::APSInt V = UO->getSubExpr()->EvaluateKnownConstInt(Context);
+  // FIXME: Add a diagnostic for this to BuildBuiltinUnaryOp.
+  assert(V.ule(1000000) && "internal error: bad person detected");
+  return V.getZExtValue();
+}
+
 bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
                                            SourceRange PatternRange,
                                    ArrayRef<UnexpandedParameterPack> Unexpanded,
@@ -551,8 +566,7 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
       Depth = TTP->getDepth();
       Index = TTP->getIndex();
       Name = TTP->getIdentifier();
-    } else {
-      NamedDecl *ND = i->first.get<NamedDecl *>();
+    } else if (NamedDecl *ND = i->first.dyn_cast<NamedDecl *>()) {
       if (isa<ParmVarDecl>(ND))
         IsFunctionParameterPack = true;
       else
@@ -560,10 +574,16 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
       
       Name = ND->getIdentifier();
     }
-    
+
     // Determine the size of this argument pack.
     unsigned NewPackSize;    
-    if (IsFunctionParameterPack) {
+    if (UnaryOperator *UO = i->first.dyn_cast<UnaryOperator *>()) {
+      if (UO->getSubExpr()->isValueDependent()) {
+        ShouldExpand = false;
+        continue;
+      }
+      NewPackSize = getNumArgumentsInPackExpression(Context, UO);
+    } else if (IsFunctionParameterPack) {
       // Figure out whether we're instantiating to an argument pack or not.
       typedef LocalInstantiationScope::DeclArgumentPack DeclArgumentPack;
       
@@ -652,8 +672,7 @@ llvm::Optional<unsigned> Sema::getNumArgumentsInExpansion(QualType T,
           = Unexpanded[I].first.dyn_cast<const TemplateTypeParmType *>()) {
       Depth = TTP->getDepth();
       Index = TTP->getIndex();
-    } else {      
-      NamedDecl *ND = Unexpanded[I].first.get<NamedDecl *>();
+    } else if (NamedDecl *ND = Unexpanded[I].first.dyn_cast<NamedDecl *>()) {
       if (isa<ParmVarDecl>(ND)) {
         // Function parameter pack.
         typedef LocalInstantiationScope::DeclArgumentPack DeclArgumentPack;
@@ -673,6 +692,14 @@ llvm::Optional<unsigned> Sema::getNumArgumentsInExpansion(QualType T,
       }
       
       llvm::tie(Depth, Index) = getDepthAndIndex(ND);        
+    } else {
+      UnaryOperator *UO = Unexpanded[I].first.get<UnaryOperator *>();
+      if (UO->getSubExpr()->isValueDependent())
+        return llvm::Optional<unsigned>();
+      unsigned Size = getNumArgumentsInPackExpression(Context, UO);
+      assert((!Result || *Result == Size) && "inconsistent pack sizes");
+      Result = Size;
+      continue;
     }
     if (Depth >= TemplateArgs.getNumLevels() ||
         !TemplateArgs.hasTemplateArgument(Depth, Index))

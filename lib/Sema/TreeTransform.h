@@ -6214,6 +6214,11 @@ TreeTransform<Derived>::TransformUnaryOperator(UnaryOperator *E) {
   if (SubExpr.isInvalid())
     return ExprError();
 
+  if (E->getOpcode() == UO_Pack &&
+      SemaRef.ArgumentPackSubstitutionIndex != -1)
+    return SemaRef.ActOnIntegerConstant(E->getOperatorLoc(),
+                                        SemaRef.ArgumentPackSubstitutionIndex);
+
   if (!getDerived().AlwaysRebuild() && SubExpr.get() == E->getSubExpr())
     return SemaRef.Owned(E);
 

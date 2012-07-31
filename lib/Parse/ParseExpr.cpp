@@ -899,6 +899,12 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     return move(Res);
   }
 
+  case tok::ellipsis:      // unary-expression: '...' cast-expression [C++1y]
+    if (!getLangOpts().CPlusPlus0x) { // FIXME: C++1y
+      NotCastExpr = true;
+      return ExprError();
+    }
+    // Fall through.
   case tok::star:          // unary-expression: '*' cast-expression
   case tok::plus:          // unary-expression: '+' cast-expression
   case tok::minus:         // unary-expression: '-' cast-expression

@@ -324,7 +324,8 @@ enum UnaryOperatorKind {
   UO_Plus, UO_Minus,      // [C99 6.5.3.3] Unary arithmetic
   UO_Not, UO_LNot,        // [C99 6.5.3.3] Unary arithmetic
   UO_Real, UO_Imag,       // "__real expr"/"__imag expr" Extension.
-  UO_Extension            // __extension__ marker.
+  UO_Extension,           // __extension__ marker.
+  UO_Pack                 // C++1y [expr.pack] Pack operator.
 };
 
 /// \brief The kind of bridging performed by the Objective-C bridge cast.

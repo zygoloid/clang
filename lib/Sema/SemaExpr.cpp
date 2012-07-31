@@ -8154,6 +8154,7 @@ static inline UnaryOperatorKind ConvertTokenKindToUnaryOpcode(
   case tok::kw___real:    Opc = UO_Real; break;
   case tok::kw___imag:    Opc = UO_Imag; break;
   case tok::kw___extension__: Opc = UO_Extension; break;
+  case tok::ellipsis:     Opc = UO_Pack; break;
   }
   return Opc;
 }
@@ -8738,6 +8739,13 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
     resultType = Input.get()->getType();
     VK = Input.get()->getValueKind();
     OK = Input.get()->getObjectKind();
+    break;
+  case UO_Pack:
+    // FIXME: Also support expressions of array type here.
+    if (!Input.get()->isValueDependent())
+      Input = VerifyIntegerConstantExpression(Input.take());
+    if (!Input.isInvalid())
+      resultType = Input.get()->getType();
     break;
   }
   if (resultType.isNull() || Input.isInvalid())
