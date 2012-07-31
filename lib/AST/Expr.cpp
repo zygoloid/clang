@@ -901,6 +901,7 @@ UnaryOperator::getOverloadedOpcode(OverloadedOperatorKind OO, bool Postfix) {
   case OO_Minus:      return UO_Minus;
   case OO_Tilde:      return UO_Not;
   case OO_Exclaim:    return UO_LNot;
+  case OO_Pack:       return UO_Pack;
   }
 }
 
@@ -914,7 +915,7 @@ OverloadedOperatorKind UnaryOperator::getOverloadedOperator(Opcode Opc) {
   case UO_Minus: return OO_Minus;
   case UO_Not: return OO_Tilde;
   case UO_LNot: return OO_Exclaim;
-  //case UO_Pack: return OO_Pack; // TODO
+  case UO_Pack: return OO_Pack;
   default: return OO_None;
   }
 }
@@ -1649,7 +1650,6 @@ OverloadedOperatorKind BinaryOperator::getOverloadedOperator(Opcode Opc) {
     OO_Star, OO_Slash, OO_Percent,
     OO_Plus, OO_Minus,
     OO_LessLess, OO_GreaterGreater,
-    /* ... cannot be overloaded */OO_None,
     OO_Less, OO_Greater, OO_LessEqual, OO_GreaterEqual,
     OO_EqualEqual, OO_ExclaimEqual,
     OO_Amp,

@@ -1650,6 +1650,9 @@ CXXNameMangler::mangleOperatorName(OverloadedOperatorKind OO, unsigned Arity) {
   // mangling expressions.
   case OO_Conditional: Out << "qu"; break;
 
+  //              ::= v <digit> <source-name> # vendor extended operator
+  case OO_Pack: Out << "v16__pack"; break;
+
   case OO_None:
   case NUM_OVERLOADED_OPERATORS:
     llvm_unreachable("Not an overloaded operator");

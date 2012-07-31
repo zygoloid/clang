@@ -96,6 +96,7 @@ OVERLOADED_OPERATOR(MinusMinus           , "--"  , minusminus         , true , t
 OVERLOADED_OPERATOR(Comma                , ","   , comma              , false, true , false)
 OVERLOADED_OPERATOR(ArrowStar            , "->*" , arrowstar          , false, true , false)
 OVERLOADED_OPERATOR(Arrow                , "->"  , arrow              , true , false, true)
+OVERLOADED_OPERATOR(Pack                 , "..." , ellipsis           , true , false, true)
 OVERLOADED_OPERATOR_MULTI(Call           , "()"                       , true , true , true)
 OVERLOADED_OPERATOR_MULTI(Subscript      , "[]"                       , false, true , true)
 // ?: can *not* be overloaded, but we need the overload

@@ -674,6 +674,7 @@ void MicrosoftCXXNameMangler::mangleOperatorName(OverloadedOperatorKind OO,
   // <operator-name> ::= ?_V # delete[]
   case OO_Array_Delete: Out << "?_V"; break;
     
+  case OO_Pack:
   case OO_Conditional: {
     DiagnosticsEngine &Diags = Context.getDiags();
     unsigned DiagID = Diags.getCustomDiagID(DiagnosticsEngine::Error,

@@ -676,6 +676,10 @@ static Stmt::StmtClass DecodeOperatorCall(const CXXOperatorCallExpr *S,
       
   case OO_Subscript:
     return Stmt::ArraySubscriptExprClass;
+
+  case OO_Pack:
+    UnaryOp = UO_Pack;
+    return Stmt::UnaryOperatorClass;
   }
   
   llvm_unreachable("Invalid overloaded operator expression");

@@ -7444,6 +7444,23 @@ public:
       }
     }
   }
+
+  // C++1y [over.built] FIXME:
+  //   For every promoted integral type T, there exist candidate
+  //   operator functions of the form
+  //
+  //        T         operator...(T);
+  void addPackOverloads() {
+    if (!HasArithmeticOrEnumeralCandidateType)
+      return;
+
+    for (unsigned Int = FirstPromotedIntegralType;
+         Int < LastPromotedIntegralType; ++Int) {
+      QualType IntTy = getArithmeticType(Int);
+      S.AddBuiltinCandidate(IntTy, &IntTy, Args, 1, CandidateSet);
+    }
+  }
+
 };
 
 } // end anonymous namespace
@@ -7631,6 +7648,10 @@ Sema::AddBuiltinOperatorCandidates(OverloadedOperatorKind Op,
   case OO_Conditional:
     OpBuilder.addConditionalOperatorOverloads();
     OpBuilder.addGenericBinaryArithmeticOverloads(/*isComparison=*/false);
+    break;
+
+  case OO_Pack:
+    OpBuilder.addPackOverloads();
     break;
   }
 }
