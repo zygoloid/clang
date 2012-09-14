@@ -258,7 +258,7 @@ public:
                           const ExplodedNodeSet &Src,
                           SVal location, SVal val,
                           const Stmt *S, ExprEngine &Eng,
-                          ProgramPoint::Kind PointKind);
+                          const ProgramPoint &PP);
 
   /// \brief Run checkers for end of analysis.
   void runCheckersForEndAnalysis(ExplodedGraph &G, BugReporter &BR,
@@ -319,9 +319,11 @@ public:
                                                SVal Cond, bool Assumption);
 
   /// \brief Run checkers for evaluating a call.
+  ///
+  /// Warning: Currently, the CallEvent MUST come from a CallExpr!
   void runCheckersForEvalCall(ExplodedNodeSet &Dst,
                               const ExplodedNodeSet &Src,
-                              const SimpleCall &CE, ExprEngine &Eng);
+                              const CallEvent &CE, ExprEngine &Eng);
   
   /// \brief Run checkers for the entire Translation Unit.
   void runCheckersOnEndOfTranslationUnit(const TranslationUnitDecl *TU,

@@ -90,6 +90,34 @@ void check_writeback_specifier()
   char *b;
   printf("%n", b); // expected-warning{{format specifies type 'int *' but the argument has type 'char *'}}
   printf("%n", &x); // no-warning
+
+  printf("%hhn", (signed char*)0); // no-warning
+  printf("%hhn", (char*)0); // no-warning
+  printf("%hhn", (unsigned char*)0); // no-warning
+  printf("%hhn", (int*)0); // expected-warning{{format specifies type 'signed char *' but the argument has type 'int *'}}
+
+  printf("%hn", (short*)0); // no-warning
+  printf("%hn", (unsigned short*)0); // no-warning
+  printf("%hn", (int*)0); // expected-warning{{format specifies type 'short *' but the argument has type 'int *'}}
+
+  printf("%n", (int*)0); // no-warning
+  printf("%n", (unsigned int*)0); // no-warning
+  printf("%n", (char*)0); // expected-warning{{format specifies type 'int *' but the argument has type 'char *'}}
+
+  printf("%ln", (long*)0); // no-warning
+  printf("%ln", (unsigned long*)0); // no-warning
+  printf("%ln", (int*)0); // expected-warning{{format specifies type 'long *' but the argument has type 'int *'}}
+
+  printf("%lln", (long long*)0); // no-warning
+  printf("%lln", (unsigned long long*)0); // no-warning
+  printf("%lln", (int*)0); // expected-warning{{format specifies type 'long long *' but the argument has type 'int *'}}
+
+  printf("%qn", (long long*)0); // no-warning
+  printf("%qn", (unsigned long long*)0); // no-warning
+  printf("%qn", (int*)0); // expected-warning{{format specifies type 'long long *' but the argument has type 'int *'}}
+
+  printf("%Ln", 0); // expected-warning{{length modifier 'L' results in undefined behavior or no effect with 'n' conversion specifier}}
+  // expected-note@-1{{did you mean to use 'll'?}}
 }
 
 void check_invalid_specifier(FILE* fp, char *buf)
@@ -504,17 +532,6 @@ void pr9751() {
          0.0); // expected-warning{{format specifies}}
 }
 
-// PR 9466: clang: doesn't know about %Lu, %Ld, and %Lx 
-void printf_longlong(long long x, unsigned long long y) {
-  printf("%Ld", y); // no-warning
-  printf("%Lu", y); // no-warning
-  printf("%Lx", y); // no-warning
-  printf("%Ld", x); // no-warning
-  printf("%Lu", x); // no-warning
-  printf("%Lx", x); // no-warning
-  printf("%Ls", "hello"); // expected-warning {{length modifier 'L' results in undefined behavior or no effect with 's' conversion specifier}}
-}
-
 void __attribute__((format(strfmon,1,2))) monformat(const char *fmt, ...);
 void __attribute__((format(strftime,1,0))) dateformat(const char *fmt);
 
@@ -554,4 +571,20 @@ extern void test14_bar(const char *, const char *, ...)
 void test14_zed(int *p) {
   test14_foo("%", "%d", p); // expected-warning{{incomplete format specifier}}
   test14_bar("%", "%d", p); // expected-warning{{incomplete format specifier}}
+}
+
+void test_qualifiers(volatile int *vip, const int *cip,
+                     const volatile int *cvip) {
+  printf("%n", cip); // expected-warning{{format specifies type 'int *' but the argument has type 'const int *'}}
+  printf("%n", cvip); // expected-warning{{format specifies type 'int *' but the argument has type 'const volatile int *'}}
+
+  printf("%n", vip); // No warning.
+  printf("%p", cip); // No warning.
+  printf("%p", cvip); // No warning.
+
+
+  typedef int* ip_t;
+  typedef const int* cip_t;
+  printf("%n", (ip_t)0); // No warning.
+  printf("%n", (cip_t)0); // expected-warning{{format specifies type 'int *' but the argument has type 'cip_t' (aka 'const int *')}}
 }

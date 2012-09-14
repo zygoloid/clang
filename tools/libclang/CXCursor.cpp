@@ -145,8 +145,8 @@ CXCursor cxcursor::MakeCXCursor(Stmt *S, Decl *Parent, CXTranslationUnit TU,
     K = CXCursor_ReturnStmt;
     break;
   
-  case Stmt::AsmStmtClass:
-    K = CXCursor_AsmStmt;
+  case Stmt::GCCAsmStmtClass:
+    K = CXCursor_GCCAsmStmt;
     break;
 
   case Stmt::MSAsmStmtClass:
@@ -432,6 +432,7 @@ CXCursor cxcursor::MakeCXCursor(Stmt *S, Decl *Parent, CXTranslationUnit TU,
   case Stmt::DependentScopeDeclRefExprClass:
   case Stmt::SubstNonTypeTemplateParmExprClass:
   case Stmt::SubstNonTypeTemplateParmPackExprClass:
+  case Stmt::FunctionParmPackExprClass:
   case Stmt::UnresolvedLookupExprClass:
     K = CXCursor_DeclRefExpr;
     break;

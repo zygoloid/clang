@@ -528,6 +528,11 @@ def ObjCReturnsInnerPointer : Attr {
   let Subjects = [ObjCMethod];
 }
 
+def ObjCRequiresSuper : InheritableAttr {
+  let Spellings = [GNU<"objc_requires_super">];
+  let Subjects = [ObjCMethod];
+}
+
 def ObjCRootClass : Attr {
   let Spellings = [GNU<"objc_root_class">];
   let Subjects = [ObjCInterface];
@@ -824,6 +829,27 @@ def SharedLocksRequired : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+}
+
+// Type safety attributes for `void *' pointers and type tags.
+
+def ArgumentWithTypeTag : InheritableAttr {
+  let Spellings = [GNU<"argument_with_type_tag">,
+                   GNU<"pointer_with_type_tag">];
+  let Args = [IdentifierArgument<"ArgumentKind">,
+              UnsignedArgument<"ArgumentIdx">,
+              UnsignedArgument<"TypeTagIdx">,
+              BoolArgument<"IsPointer">];
+  let Subjects = [Function];
+}
+
+def TypeTagForDatatype : InheritableAttr {
+  let Spellings = [GNU<"type_tag_for_datatype">];
+  let Args = [IdentifierArgument<"ArgumentKind">,
+              TypeArgument<"MatchingCType">,
+              BoolArgument<"LayoutCompatible">,
+              BoolArgument<"MustBeNull">];
+  let Subjects = [Var];
 }
 
 // Microsoft-related attributes

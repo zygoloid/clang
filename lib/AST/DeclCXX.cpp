@@ -466,7 +466,8 @@ void CXXRecordDecl::addedMember(Decl *D) {
   if (!D->isImplicit() &&
       !isa<FieldDecl>(D) &&
       !isa<IndirectFieldDecl>(D) &&
-      (!isa<TagDecl>(D) || cast<TagDecl>(D)->getTagKind() == TTK_Class))
+      (!isa<TagDecl>(D) || cast<TagDecl>(D)->getTagKind() == TTK_Class ||
+        cast<TagDecl>(D)->getTagKind() == TTK_Interface))
     data().HasOnlyCMembers = false;
 
   // Ignore friends and invalid declarations.
@@ -936,7 +937,8 @@ NotASpecialMember:;
 }
 
 bool CXXRecordDecl::isCLike() const {
-  if (getTagKind() == TTK_Class || !TemplateOrInstantiation.isNull())
+  if (getTagKind() == TTK_Class || getTagKind() == TTK_Interface ||
+      !TemplateOrInstantiation.isNull())
     return false;
   if (!hasDefinition())
     return true;
@@ -1294,15 +1296,20 @@ static bool recursivelyOverrides(const CXXMethodDecl *DerivedMD,
 }
 
 CXXMethodDecl *
-CXXMethodDecl::getCorrespondingMethodInClass(const CXXRecordDecl *RD) {
+CXXMethodDecl::getCorrespondingMethodInClass(const CXXRecordDecl *RD,
+                                             bool MayBeBase) {
   if (this->getParent()->getCanonicalDecl() == RD->getCanonicalDecl())
     return this;
 
   // Lookup doesn't work for destructors, so handle them separately.
   if (isa<CXXDestructorDecl>(this)) {
     CXXMethodDecl *MD = RD->getDestructor();
-    if (MD && recursivelyOverrides(MD, this))
-      return MD;
+    if (MD) {
+      if (recursivelyOverrides(MD, this))
+        return MD;
+      if (MayBeBase && recursivelyOverrides(this, MD))
+        return MD;
+    }
     return NULL;
   }
 
@@ -1312,6 +1319,8 @@ CXXMethodDecl::getCorrespondingMethodInClass(const CXXRecordDecl *RD) {
     if (!MD)
       continue;
     if (recursivelyOverrides(MD, this))
+      return MD;
+    if (MayBeBase && recursivelyOverrides(this, MD))
       return MD;
   }
 

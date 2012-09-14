@@ -15,10 +15,16 @@
 #define LLVM_CLANG_AST_COMMENT_H
 
 #include "clang/Basic/SourceLocation.h"
+#include "clang/AST/Type.h"
+#include "clang/AST/CommentCommandTraits.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 
 namespace clang {
+class Decl;
+class ParmVarDecl;
+class TemplateParameterList;
+
 namespace comments {
 
 /// Any part of the comment.
@@ -69,8 +75,9 @@ protected:
     unsigned : NumInlineContentCommentBits;
 
     unsigned RenderKind : 2;
+    unsigned CommandID : 8;
   };
-  enum { NumInlineCommandCommentBits = NumInlineContentCommentBits + 1 };
+  enum { NumInlineCommandCommentBits = NumInlineContentCommentBits + 10 };
 
   class HTMLStartTagCommentBitfields {
     friend class HTMLStartTagComment;
@@ -96,10 +103,19 @@ protected:
   };
   enum { NumParagraphCommentBits = NumCommentBits + 2 };
 
+  class BlockCommandCommentBitfields {
+    friend class BlockCommandComment;
+
+    unsigned : NumCommentBits;
+
+    unsigned CommandID : 8;
+  };
+  enum { NumBlockCommandCommentBits = NumCommentBits + 8 };
+
   class ParamCommandCommentBitfields {
     friend class ParamCommandComment;
 
-    unsigned : NumCommentBits;
+    unsigned : NumBlockCommandCommentBits;
 
     /// Parameter passing direction, see ParamCommandComment::PassDirection.
     unsigned Direction : 2;
@@ -107,7 +123,7 @@ protected:
     /// True if direction was specified explicitly in the comment.
     unsigned IsDirectionExplicit : 1;
   };
-  enum { NumParamCommandCommentBits = 11 };
+  enum { NumParamCommandCommentBits = NumBlockCommandCommentBits + 3 };
 
   union {
     CommentBitfields CommentBits;
@@ -116,6 +132,7 @@ protected:
     InlineCommandCommentBitfields InlineCommandCommentBits;
     HTMLStartTagCommentBitfields HTMLStartTagCommentBits;
     ParagraphCommentBitfields ParagraphCommentBits;
+    BlockCommandCommentBitfields BlockCommandCommentBits;
     ParamCommandCommentBitfields ParamCommandCommentBits;
   };
 
@@ -153,8 +170,9 @@ public:
   const char *getCommentKindName() const;
 
   LLVM_ATTRIBUTE_USED void dump() const;
-  LLVM_ATTRIBUTE_USED void dump(SourceManager &SM) const;
-  void dump(llvm::raw_ostream &OS, SourceManager *SM) const;
+  LLVM_ATTRIBUTE_USED void dump(const ASTContext &Context) const;
+  void dump(llvm::raw_ostream &OS, const CommandTraits *Traits,
+            const SourceManager *SM) const;
 
   static bool classof(const Comment *) { return true; }
 
@@ -268,21 +286,19 @@ public:
   };
 
 protected:
-  /// Command name.
-  StringRef Name;
-
   /// Command arguments.
   llvm::ArrayRef<Argument> Args;
 
 public:
   InlineCommandComment(SourceLocation LocBegin,
                        SourceLocation LocEnd,
-                       StringRef Name,
+                       unsigned CommandID,
                        RenderKind RK,
                        llvm::ArrayRef<Argument> Args) :
       InlineContentComment(InlineCommandCommentKind, LocBegin, LocEnd),
-      Name(Name), Args(Args) {
+      Args(Args) {
     InlineCommandCommentBits.RenderKind = RK;
+    InlineCommandCommentBits.CommandID = CommandID;
   }
 
   static bool classof(const Comment *C) {
@@ -295,8 +311,12 @@ public:
 
   child_iterator child_end() const { return NULL; }
 
-  StringRef getCommandName() const {
-    return Name;
+  unsigned getCommandID() const {
+    return InlineCommandCommentBits.CommandID;
+  }
+
+  StringRef getCommandName(const CommandTraits &Traits) const {
+    return Traits.getCommandInfo(getCommandID())->Name;
   }
 
   SourceRange getCommandNameRange() const {
@@ -561,9 +581,6 @@ public:
   };
 
 protected:
-  /// Command name.
-  StringRef Name;
-
   /// Word-like arguments.
   llvm::ArrayRef<Argument> Args;
 
@@ -573,21 +590,21 @@ protected:
   BlockCommandComment(CommentKind K,
                       SourceLocation LocBegin,
                       SourceLocation LocEnd,
-                      StringRef Name) :
+                      unsigned CommandID) :
       BlockContentComment(K, LocBegin, LocEnd),
-      Name(Name),
       Paragraph(NULL) {
-    setLocation(getCommandNameRange().getBegin());
+    setLocation(getCommandNameBeginLoc());
+    BlockCommandCommentBits.CommandID = CommandID;
   }
 
 public:
   BlockCommandComment(SourceLocation LocBegin,
                       SourceLocation LocEnd,
-                      StringRef Name) :
+                      unsigned CommandID) :
       BlockContentComment(BlockCommandCommentKind, LocBegin, LocEnd),
-      Name(Name),
       Paragraph(NULL) {
-    setLocation(getCommandNameRange().getBegin());
+    setLocation(getCommandNameBeginLoc());
+    BlockCommandCommentBits.CommandID = CommandID;
   }
 
   static bool classof(const Comment *C) {
@@ -605,12 +622,21 @@ public:
     return reinterpret_cast<child_iterator>(&Paragraph + 1);
   }
 
-  StringRef getCommandName() const {
-    return Name;
+  unsigned getCommandID() const {
+    return BlockCommandCommentBits.CommandID;
   }
 
-  SourceRange getCommandNameRange() const {
-    return SourceRange(getLocStart().getLocWithOffset(1),
+  StringRef getCommandName(const CommandTraits &Traits) const {
+    return Traits.getCommandInfo(getCommandID())->Name;
+  }
+
+  SourceLocation getCommandNameBeginLoc() const {
+    return getLocStart().getLocWithOffset(1);
+  }
+
+  SourceRange getCommandNameRange(const CommandTraits &Traits) const {
+    StringRef Name = getCommandName(Traits);
+    return SourceRange(getCommandNameBeginLoc(),
                        getLocStart().getLocWithOffset(1 + Name.size()));
   }
 
@@ -662,8 +688,9 @@ public:
 
   ParamCommandComment(SourceLocation LocBegin,
                       SourceLocation LocEnd,
-                      StringRef Name) :
-      BlockCommandComment(ParamCommandCommentKind, LocBegin, LocEnd, Name),
+                      unsigned CommandID) :
+      BlockCommandComment(ParamCommandCommentKind, LocBegin, LocEnd,
+                          CommandID),
       ParamIndex(InvalidParamIndex) {
     ParamCommandCommentBits.Direction = In;
     ParamCommandCommentBits.IsDirectionExplicit = false;
@@ -723,6 +750,68 @@ public:
   }
 };
 
+/// Doxygen \\tparam command, describes a template parameter.
+class TParamCommandComment : public BlockCommandComment {
+private:
+  /// If this template parameter name was resolved (found in template parameter
+  /// list), then this stores a list of position indexes in all template
+  /// parameter lists.
+  ///
+  /// For example:
+  /// \verbatim
+  ///     template<typename C, template<typename T> class TT>
+  ///     void test(TT<int> aaa);
+  /// \endverbatim
+  /// For C:  Position = { 0 }
+  /// For TT: Position = { 1 }
+  /// For T:  Position = { 1, 0 }
+  llvm::ArrayRef<unsigned> Position;
+
+public:
+  TParamCommandComment(SourceLocation LocBegin,
+                       SourceLocation LocEnd,
+                       unsigned CommandID) :
+      BlockCommandComment(TParamCommandCommentKind, LocBegin, LocEnd, CommandID)
+  { }
+
+  static bool classof(const Comment *C) {
+    return C->getCommentKind() == TParamCommandCommentKind;
+  }
+
+  static bool classof(const TParamCommandComment *) { return true; }
+
+  bool hasParamName() const {
+    return getNumArgs() > 0;
+  }
+
+  StringRef getParamName() const {
+    return Args[0].Text;
+  }
+
+  SourceRange getParamNameRange() const {
+    return Args[0].Range;
+  }
+
+  bool isPositionValid() const LLVM_READONLY {
+    return !Position.empty();
+  }
+
+  unsigned getDepth() const {
+    assert(isPositionValid());
+    return Position.size();
+  }
+
+  unsigned getIndex(unsigned Depth) const {
+    assert(isPositionValid());
+    return Position[Depth];
+  }
+
+  void setPosition(ArrayRef<unsigned> NewPosition) {
+    Position = NewPosition;
+    assert(isPositionValid());
+  }
+};
+
 /// A line of text contained in a verbatim block.
 class VerbatimBlockLineComment : public Comment {
   StringRef Text;
@@ -763,9 +852,9 @@ protected:
 public:
   VerbatimBlockComment(SourceLocation LocBegin,
                        SourceLocation LocEnd,
-                       StringRef Name) :
+                       unsigned CommandID) :
       BlockCommandComment(VerbatimBlockCommentKind,
-                          LocBegin, LocEnd, Name)
+                          LocBegin, LocEnd, CommandID)
   { }
 
   static bool classof(const Comment *C) {
@@ -815,12 +904,12 @@ protected:
 public:
   VerbatimLineComment(SourceLocation LocBegin,
                       SourceLocation LocEnd,
-                      StringRef Name,
+                      unsigned CommandID,
                       SourceLocation TextBegin,
                       StringRef Text) :
       BlockCommandComment(VerbatimLineCommentKind,
                           LocBegin, LocEnd,
-                          Name),
+                          CommandID),
       Text(Text),
       TextBegin(TextBegin)
   { }
@@ -844,14 +933,116 @@ public:
   }
 };
 
+/// Information about the declaration, useful to clients of FullComment.
+struct DeclInfo {
+  /// Declaration the comment is attached to.  Should not be NULL.
+  const Decl *ThisDecl;
+
+  /// Parameters that can be referenced by \\param if \c ThisDecl is something
+  /// that we consider a "function".
+  ArrayRef<const ParmVarDecl *> ParamVars;
+
+  /// Function result type if \c ThisDecl is something that we consider
+  /// a "function".
+  QualType ResultType;
+
+  /// Template parameters that can be referenced by \\tparam if \c ThisDecl is
+  /// a template (\c IsTemplateDecl or \c IsTemplatePartialSpecialization is
+  /// true).
+  const TemplateParameterList *TemplateParameters;
+
+  /// A simplified description of \c ThisDecl kind that should be good enough
+  /// for documentation rendering purposes.
+  enum DeclKind {
+    /// Everything else not explicitly mentioned below.
+    OtherKind,
+
+    /// Something that we consider a "function":
+    /// \li function,
+    /// \li function template,
+    /// \li function template specialization,
+    /// \li member function,
+    /// \li member function template,
+    /// \li member function template specialization,
+    /// \li ObjC method,
+    /// \li a typedef for a function pointer, member function pointer,
+    ///     ObjC block.
+    FunctionKind,
+
+    /// Something that we consider a "class":
+    /// \li class/struct,
+    /// \li class template,
+    /// \li class template (partial) specialization.
+    ClassKind,
+
+    /// Something that we consider a "variable":
+    /// \li namespace scope variables;
+    /// \li static and non-static class data members;
+    /// \li enumerators.
+    VariableKind,
+
+    /// A C++ namespace.
+    NamespaceKind,
+
+    /// A C++ typedef-name (a 'typedef' decl specifier or alias-declaration),
+    /// see \c TypedefNameDecl.
+    TypedefKind,
+
+    /// An enumeration or scoped enumeration.
+    EnumKind
+  };
+
+  /// What kind of template specialization \c ThisDecl is.
+  enum TemplateDeclKind {
+    NotTemplate,
+    Template,
+    TemplateSpecialization,
+    TemplatePartialSpecialization
+  };
+
+  /// If false, only \c ThisDecl is valid.
+  unsigned IsFilled : 1;
+
+  /// Simplified kind of \c ThisDecl, see\c DeclKind enum.
+  unsigned Kind : 3;
+
+  /// Is \c ThisDecl a template declaration.
+  unsigned TemplateKind : 2;
+
+  /// Is \c ThisDecl an ObjCMethodDecl.
+  unsigned IsObjCMethod : 1;
+
+  /// Is \c ThisDecl a non-static member function of C++ class or
+  /// instance method of ObjC class.
+  /// Can be true only if \c IsFunctionDecl is true.
+  unsigned IsInstanceMethod : 1;
+
+  /// Is \c ThisDecl a static member function of C++ class or
+  /// class method of ObjC class.
+  /// Can be true only if \c IsFunctionDecl is true.
+  unsigned IsClassMethod : 1;
+
+  void fill();
+
+  DeclKind getKind() const LLVM_READONLY {
+    return static_cast<DeclKind>(Kind);
+  }
+
+  TemplateDeclKind getTemplateKind() const LLVM_READONLY {
+    return static_cast<TemplateDeclKind>(TemplateKind);
+  }
+};
+
 /// A full comment attached to a declaration, contains block content.
 class FullComment : public Comment {
   llvm::ArrayRef<BlockContentComment *> Blocks;
 
+  DeclInfo *ThisDeclInfo;
+
 public:
-  FullComment(llvm::ArrayRef<BlockContentComment *> Blocks) :
+  FullComment(llvm::ArrayRef<BlockContentComment *> Blocks, DeclInfo *D) :
       Comment(FullCommentKind, SourceLocation(), SourceLocation()),
-      Blocks(Blocks) {
+      Blocks(Blocks), ThisDeclInfo(D) {
     if (Blocks.empty())
       return;
 
@@ -872,6 +1063,16 @@ public:
 
   child_iterator child_end() const {
     return reinterpret_cast<child_iterator>(Blocks.end());
+  }
+
+  const Decl *getDecl() const LLVM_READONLY {
+    return ThisDeclInfo->ThisDecl;
+  }
+
+  const DeclInfo *getDeclInfo() const LLVM_READONLY {
+    if (!ThisDeclInfo->IsFilled)
+      ThisDeclInfo->fill();
+    return ThisDeclInfo;
   }
 };
 

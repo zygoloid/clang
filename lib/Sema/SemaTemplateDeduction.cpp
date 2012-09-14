@@ -570,7 +570,10 @@ static void PrepareArgumentPackDeduction(Sema &S,
     SavedPacks[I] = Deduced[PackIndices[I]];
     Deduced[PackIndices[I]] = TemplateArgument();
 
-    // If the template arugment pack was explicitly specified, add that to
+    if (!S.CurrentInstantiationScope)
+      continue;
+
+    // If the template argument pack was explicitly specified, add that to
     // the set of deduced arguments.
     const TemplateArgument *ExplicitArgs;
     unsigned NumExplicitArgs;
@@ -2162,6 +2165,9 @@ Sema::TemplateDeductionResult
 Sema::DeduceTemplateArguments(ClassTemplatePartialSpecializationDecl *Partial,
                               const TemplateArgumentList &TemplateArgs,
                               TemplateDeductionInfo &Info) {
+  if (Partial->isInvalidDecl())
+    return TDK_Invalid;
+
   // C++ [temp.class.spec.match]p2:
   //   A partial specialization matches a given actual template
   //   argument list if the template arguments of the partial
@@ -2601,7 +2607,8 @@ Sema::FinishTemplateArgumentDeduction(FunctionTemplateDecl *FunctionTemplate,
       // explicitly-specified set (C++0x [temp.arg.explicit]p9).
       const TemplateArgument *ExplicitArgs;
       unsigned NumExplicitArgs;
-      if (CurrentInstantiationScope->getPartiallySubstitutedPack(&ExplicitArgs,
+      if (CurrentInstantiationScope &&
+          CurrentInstantiationScope->getPartiallySubstitutedPack(&ExplicitArgs,
                                                              &NumExplicitArgs)
           == Param)
         Builder.push_back(TemplateArgument(ExplicitArgs, NumExplicitArgs));
@@ -2992,8 +2999,6 @@ DeduceTemplateArgumentByListElement(Sema &S,
 ///
 /// \param Args the function call arguments
 ///
-/// \param NumArgs the number of arguments in Args
-///
 /// \param Name the name of the function being called. This is only significant
 /// when the function template is a conversion function template, in which
 /// case this routine will also perform template argument deduction based on
@@ -3013,6 +3018,9 @@ Sema::DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                               llvm::ArrayRef<Expr *> Args,
                               FunctionDecl *&Specialization,
                               TemplateDeductionInfo &Info) {
+  if (FunctionTemplate->isInvalidDecl())
+    return TDK_Invalid;
+
   FunctionDecl *Function = FunctionTemplate->getTemplatedDecl();
 
   // C++ [temp.deduct.call]p1:
@@ -3269,6 +3277,9 @@ Sema::DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                               QualType ArgFunctionType,
                               FunctionDecl *&Specialization,
                               TemplateDeductionInfo &Info) {
+  if (FunctionTemplate->isInvalidDecl())
+    return TDK_Invalid;
+
   FunctionDecl *Function = FunctionTemplate->getTemplatedDecl();
   TemplateParameterList *TemplateParams
     = FunctionTemplate->getTemplateParameters();
@@ -3328,6 +3339,9 @@ Sema::DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                               QualType ToType,
                               CXXConversionDecl *&Specialization,
                               TemplateDeductionInfo &Info) {
+  if (FunctionTemplate->isInvalidDecl())
+    return TDK_Invalid;
+
   CXXConversionDecl *Conv
     = cast<CXXConversionDecl>(FunctionTemplate->getTemplatedDecl());
   QualType FromType = Conv->getConversionType();

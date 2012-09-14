@@ -55,7 +55,7 @@ def warn_cxx98_compat_no_newline_eof : Warning<
 
 def ext_dollar_in_identifier : Extension<"'$' in identifier">,
   InGroup<DiagGroup<"dollar-in-identifier-extension">>;
-def ext_charize_microsoft : Extension<"@# is a microsoft extension">,
+def ext_charize_microsoft : Extension<"charizing operator #@ is a Microsoft extension">,
   InGroup<Microsoft>;
 
 def ext_token_used : Extension<"extension used">,
@@ -332,8 +332,7 @@ def err_feature_check_malformed : Error<
   "builtin feature check macro requires a parenthesized identifier">;
 
 def err_warning_check_malformed : Error<
-  "builtin warning check macro requires a parenthesized string">,
-  InGroup<MalformedWarningCheck>;
+  "builtin warning check macro requires a parenthesized string">;
 def warn_has_warning_invalid_option :
    ExtWarn<"__has_warning expected option name (e.g. \"-Wundef\")">,
    InGroup<MalformedWarningCheck>;

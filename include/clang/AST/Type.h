@@ -160,6 +160,44 @@ public:
 
   Qualifiers() : Mask(0) {}
 
+  /// \brief Returns the common set of qualifiers while removing them from
+  /// the given sets.
+  static Qualifiers removeCommonQualifiers(Qualifiers &L, Qualifiers &R) {
+    // If both are only CVR-qualified, bit operations are sufficient.
+    if (!(L.Mask & ~CVRMask) && !(R.Mask & ~CVRMask)) {
+      Qualifiers Q;
+      Q.Mask = L.Mask & R.Mask;
+      L.Mask &= ~Q.Mask;
+      R.Mask &= ~Q.Mask;
+      return Q;
+    }
+
+    Qualifiers Q;
+    unsigned CommonCRV = L.getCVRQualifiers() & R.getCVRQualifiers();
+    Q.addCVRQualifiers(CommonCRV);
+    L.removeCVRQualifiers(CommonCRV);
+    R.removeCVRQualifiers(CommonCRV);
+
+    if (L.getObjCGCAttr() == R.getObjCGCAttr()) {
+      Q.setObjCGCAttr(L.getObjCGCAttr());
+      L.removeObjCGCAttr();
+      R.removeObjCGCAttr();
+    }
+
+    if (L.getObjCLifetime() == R.getObjCLifetime()) {
+      Q.setObjCLifetime(L.getObjCLifetime());
+      L.removeObjCLifetime();
+      R.removeObjCLifetime();
+    }
+
+    if (L.getAddressSpace() == R.getAddressSpace()) {
+      Q.setAddressSpace(L.getAddressSpace());
+      L.removeAddressSpace();
+      R.removeAddressSpace();
+    }
+    return Q;
+  }
+
   static Qualifiers fromFastMask(unsigned Mask) {
     Qualifiers Qs;
     Qs.addFastQualifiers(Mask);
@@ -333,6 +371,23 @@ public:
     }
   }
 
+  /// \brief Remove the qualifiers from the given set from this set.
+  void removeQualifiers(Qualifiers Q) {
+    // If the other set doesn't have any non-boolean qualifiers, just
+    // bit-and the inverse in.
+    if (!(Q.Mask & ~CVRMask))
+      Mask &= ~Q.Mask;
+    else {
+      Mask &= ~(Q.Mask & CVRMask);
+      if (getObjCGCAttr() == Q.getObjCGCAttr())
+        removeObjCGCAttr();
+      if (getObjCLifetime() == Q.getObjCLifetime())
+        removeObjCLifetime();
+      if (getAddressSpace() == Q.getAddressSpace())
+        removeAddressSpace();
+    }
+  }
+
   /// \brief Add the qualifiers from the given set to this set, given that
   /// they don't conflict.
   void addConsistentQualifiers(Qualifiers qs) {
@@ -378,8 +433,6 @@ public:
     return hasConst();
   }
 
-  bool isSupersetOf(Qualifiers Other) const;
-
   /// \brief Determine whether this set of qualifiers is a strict superset of
   /// another set of qualifiers, not considering qualifier compatibility.
   bool isStrictSupersetOf(Qualifiers Other) const;
@@ -402,7 +455,7 @@ public:
   }
 
   Qualifiers &operator-=(Qualifiers R) {
-    Mask = Mask & ~(R.Mask);
+    removeQualifiers(R);
     return *this;
   }
 
@@ -1140,8 +1193,6 @@ private:
     unsigned TC : 8;
 
     /// Dependent - Whether this type is a dependent type (C++ [temp.dep.type]).
-    /// Note that this should stay at the end of the ivars for Type so that
-    /// subclasses can pack their bitfields into the same word.
     unsigned Dependent : 1;
 
     /// \brief Whether this type somehow involves a template parameter, even
@@ -1516,6 +1567,7 @@ public:
   bool isRecordType() const;
   bool isClassType() const;
   bool isStructureType() const;
+  bool isInterfaceType() const;
   bool isStructureOrClassType() const;
   bool isUnionType() const;
   bool isComplexIntegerType() const;            // GCC _Complex integer type.
@@ -2680,6 +2732,9 @@ public:
   bool getNoReturnAttr() const { return getExtInfo().getNoReturn(); }
   CallingConv getCallConv() const { return getExtInfo().getCC(); }
   ExtInfo getExtInfo() const { return ExtInfo(FunctionTypeBits.ExtInfo); }
+  bool isConst() const { return getTypeQuals() & Qualifiers::Const; }
+  bool isVolatile() const { return getTypeQuals() & Qualifiers::Volatile; }
+  bool isRestrict() const { return getTypeQuals() & Qualifiers::Restrict; }
 
   /// \brief Determine the type of an expression that calls a function of
   /// this type.
@@ -3797,6 +3852,8 @@ public:
 enum TagTypeKind {
   /// \brief The "struct" keyword.
   TTK_Struct,
+  /// \brief The "__interface" keyword.
+  TTK_Interface,
   /// \brief The "union" keyword.
   TTK_Union,
   /// \brief The "class" keyword.
@@ -3810,6 +3867,8 @@ enum TagTypeKind {
 enum ElaboratedTypeKeyword {
   /// \brief The "struct" keyword introduces the elaborated-type-specifier.
   ETK_Struct,
+  /// \brief The "__interface" keyword introduces the elaborated-type-specifier.
+  ETK_Interface,
   /// \brief The "union" keyword introduces the elaborated-type-specifier.
   ETK_Union,
   /// \brief The "class" keyword introduces the elaborated-type-specifier.

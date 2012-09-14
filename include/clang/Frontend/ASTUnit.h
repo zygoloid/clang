@@ -284,12 +284,11 @@ public:
     /// \brief A bitmask that indicates which code-completion contexts should
     /// contain this completion result.
     ///
-    /// The bits in the bitmask correspond to the values of 
-    /// CodeCompleteContext::Kind. To map from a completion context kind to a 
-    /// bit, subtract one from the completion context kind and shift 1 by that
-    /// number of bits. Many completions can occur in several different
-    /// contexts.
-    unsigned ShowInContexts;
+    /// The bits in the bitmask correspond to the values of
+    /// CodeCompleteContext::Kind. To map from a completion context kind to a
+    /// bit, shift 1 by that number of bits. Many completions can occur in
+    /// several different contexts.
+    uint64_t ShowInContexts;
     
     /// \brief The priority given to this code-completion result.
     unsigned Priority;
@@ -516,7 +515,7 @@ public:
   void addFileLevelDecl(Decl *D);
 
   /// \brief Get the decls that are contained in a file in the Offset/Length
-  /// range. \arg Length can be 0 to indicate a point at \arg Offset instead of
+  /// range. \p Length can be 0 to indicate a point at \p Offset instead of
   /// a range. 
   void findFileRegionDecls(FileID File, unsigned Offset, unsigned Length,
                            SmallVectorImpl<Decl *> &Decls);
@@ -543,14 +542,14 @@ public:
   /// \brief Get the source location for the given file:offset pair.
   SourceLocation getLocation(const FileEntry *File, unsigned Offset) const;
 
-  /// \brief If \arg Loc is a loaded location from the preamble, returns
+  /// \brief If \p Loc is a loaded location from the preamble, returns
   /// the corresponding local location of the main file, otherwise it returns
-  /// \arg Loc.
+  /// \p Loc.
   SourceLocation mapLocationFromPreamble(SourceLocation Loc);
 
-  /// \brief If \arg Loc is a local location of the main file but inside the
+  /// \brief If \p Loc is a local location of the main file but inside the
   /// preamble chunk, returns the corresponding loaded location from the
-  /// preamble, otherwise it returns \arg Loc.
+  /// preamble, otherwise it returns \p Loc.
   SourceLocation mapLocationToPreamble(SourceLocation Loc);
 
   bool isInPreambleFileID(SourceLocation Loc);
@@ -558,13 +557,13 @@ public:
   SourceLocation getStartOfMainFileID();
   SourceLocation getEndOfPreambleFileID();
 
-  /// \brief \see mapLocationFromPreamble.
+  /// \see mapLocationFromPreamble.
   SourceRange mapRangeFromPreamble(SourceRange R) {
     return SourceRange(mapLocationFromPreamble(R.getBegin()),
                        mapLocationFromPreamble(R.getEnd()));
   }
 
-  /// \brief \see mapLocationToPreamble.
+  /// \see mapLocationToPreamble.
   SourceRange mapRangeToPreamble(SourceRange R) {
     return SourceRange(mapLocationToPreamble(R.getBegin()),
                        mapLocationToPreamble(R.getEnd()));
@@ -680,7 +679,7 @@ public:
   /// (e.g. because the PCH could not be loaded), this accepts the ASTUnit
   /// mainly to allow the caller to see the diagnostics.
   /// This will only receive an ASTUnit if a new one was created. If an already
-  /// created ASTUnit was passed in \param Unit then the caller can check that.
+  /// created ASTUnit was passed in \p Unit then the caller can check that.
   ///
   static ASTUnit *LoadFromCompilerInvocationAction(CompilerInvocation *CI,
                               IntrusiveRefCntPtr<DiagnosticsEngine> Diags,

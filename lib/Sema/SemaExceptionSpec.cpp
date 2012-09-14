@@ -242,8 +242,7 @@ bool Sema::CheckEquivalentExceptionSpec(FunctionDecl *Old, FunctionDecl *New) {
 
     case EST_ComputedNoexcept:
       OS << "noexcept(";
-      OldProto->getNoexceptExpr()->printPretty(OS, Context, 0, 
-                                               getPrintingPolicy());
+      OldProto->getNoexceptExpr()->printPretty(OS, 0, getPrintingPolicy());
       OS << ")";
       break;
 
@@ -1030,6 +1029,7 @@ CanThrowResult Sema::canThrow(const Expr *E) {
   case Expr::PseudoObjectExprClass:
   case Expr::SubstNonTypeTemplateParmExprClass:
   case Expr::SubstNonTypeTemplateParmPackExprClass:
+  case Expr::FunctionParmPackExprClass:
   case Expr::UnaryExprOrTypeTraitExprClass:
   case Expr::UnresolvedLookupExprClass:
   case Expr::UnresolvedMemberExprClass:

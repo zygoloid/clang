@@ -432,8 +432,7 @@ void CFRetainReleaseChecker::checkPreStmt(const CallExpr *CE,
 
     BugReport *report = new BugReport(*BT, description, N);
     report->addRange(Arg->getSourceRange());
-    report->addVisitor(bugreporter::getTrackNullOrUndefValueVisitor(N, Arg,
-                                                                    report));
+    bugreporter::trackNullOrUndefValue(N, Arg, *report);
     C.EmitReport(report);
     return;
   }
@@ -717,6 +716,73 @@ void ObjCLoopChecker::checkPostStmt(const ObjCForCollectionStmt *FCS,
   C.addTransition(State);
 }
 
+namespace {
+/// \class ObjCNonNilReturnValueChecker
+/// \brief The checker restricts the return values of APIs known to
+/// never (or almost never) return 'nil'.
+class ObjCNonNilReturnValueChecker
+  : public Checker<check::PostObjCMessage> {
+    mutable bool Initialized;
+    mutable Selector ObjectAtIndex;
+    mutable Selector ObjectAtIndexedSubscript;
+
+public:
+  ObjCNonNilReturnValueChecker() : Initialized(false) {}
+  void checkPostObjCMessage(const ObjCMethodCall &M, CheckerContext &C) const;
+};
+}
+
+static ProgramStateRef assumeExprIsNonNull(const Expr *NonNullExpr,
+                                           ProgramStateRef State,
+                                           CheckerContext &C) {
+  SVal Val = State->getSVal(NonNullExpr, C.getLocationContext());
+  if (DefinedOrUnknownSVal *DV = dyn_cast<DefinedOrUnknownSVal>(&Val))
+    return State->assume(*DV, true);
+  return State;
+}
+
+void ObjCNonNilReturnValueChecker::checkPostObjCMessage(const ObjCMethodCall &M,
+                                                        CheckerContext &C)
+                                                        const {
+  ProgramStateRef State = C.getState();
+
+  if (!Initialized) {
+    ASTContext &Ctx = C.getASTContext();
+    ObjectAtIndex = GetUnarySelector("objectAtIndex", Ctx);
+    ObjectAtIndexedSubscript = GetUnarySelector("objectAtIndexedSubscript", Ctx);
+  }
+
+  // Check the receiver type.
+  if (const ObjCInterfaceDecl *Interface = M.getReceiverInterface()) {
+
+    // Assume that object returned from '[self init]' or '[super init]' is not
+    // 'nil' if we are processing an inlined function/method.
+    //
+    // A defensive callee will (and should) check if the object returned by
+    // '[super init]' is 'nil' before doing it's own initialization. However,
+    // since 'nil' is rarely returned in practice, we should not warn when the
+    // caller to the defensive constructor uses the object in contexts where
+    // 'nil' is not accepted.
+    if (C.isWithinInlined() &&
+        M.getDecl()->getMethodFamily() == OMF_init &&
+        M.isReceiverSelfOrSuper()) {
+      State = assumeExprIsNonNull(M.getOriginExpr(), State, C);
+    }
+
+    // Objects returned from
+    // [NSArray|NSOrderedSet]::[ObjectAtIndex|ObjectAtIndexedSubscript]
+    // are never 'nil'.
+    FoundationClass Cl = findKnownClass(Interface);
+    if (Cl == FC_NSArray || Cl == FC_NSOrderedSet) {
+      Selector Sel = M.getSelector();
+      if (Sel == ObjectAtIndex || Sel == ObjectAtIndexedSubscript) {
+        // Go ahead and assume the value is non-nil.
+        State = assumeExprIsNonNull(M.getOriginExpr(), State, C);
+      }
+    }
+  }
+  C.addTransition(State);
+}
 
 //===----------------------------------------------------------------------===//
 // Check registration.
@@ -744,4 +810,8 @@ void ento::registerVariadicMethodTypeChecker(CheckerManager &mgr) {
 
 void ento::registerObjCLoopChecker(CheckerManager &mgr) {
   mgr.registerChecker<ObjCLoopChecker>();
+}
+
+void ento::registerObjCNonNilReturnValueChecker(CheckerManager &mgr) {
+  mgr.registerChecker<ObjCNonNilReturnValueChecker>();
 }

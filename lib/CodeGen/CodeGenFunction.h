@@ -222,8 +222,7 @@ public:
     /// immediately-enclosing context of the cleanup scope.  For
     /// EH cleanups, this is run in a terminate context.
     ///
-    // \param IsForEHCleanup true if this is for an EH cleanup, false
-    ///  if for a normal cleanup.
+    // \param flags cleanup kind.
     virtual void Emit(CodeGenFunction &CGF, Flags flags) = 0;
   };
 
@@ -1631,7 +1630,7 @@ public:
   /// aggregate expression, the aggloc/agglocvolatile arguments indicate where
   /// the result should be returned.
   ///
-  /// \param IgnoreResult - True if the resulting value isn't used.
+  /// \param ignoreResult True if the resulting value isn't used.
   RValue EmitAnyExpr(const Expr *E,
                      AggValueSlot aggSlot = AggValueSlot::ignored(),
                      bool ignoreResult = false);
@@ -1834,7 +1833,29 @@ public:
   void EmitStdInitializerListCleanup(llvm::Value *loc,
                                      const InitListExpr *init);
 
-  void EmitCheck(llvm::Value *, unsigned Size);
+  /// \brief Situations in which we might emit a check for the suitability of a
+  ///        pointer or glvalue.
+  enum TypeCheckKind {
+    /// Checking the operand of a load. Must be suitably sized and aligned.
+    TCK_Load,
+    /// Checking the destination of a store. Must be suitably sized and aligned.
+    TCK_Store,
+    /// Checking the bound value in a reference binding. Must be suitably sized
+    /// and aligned, but is not required to refer to an object (until the
+    /// reference is used), per core issue 453.
+    TCK_ReferenceBinding,
+    /// Checking the object expression in a non-static data member access. Must
+    /// be an object within its lifetime.
+    TCK_MemberAccess,
+    /// Checking the 'this' pointer for a call to a non-static member function.
+    /// Must be an object within its lifetime.
+    TCK_MemberCall
+  };
+
+  /// \brief Emit a check that \p V is the address of storage of the
+  /// appropriate size and alignment for an object of type \p Type.
+  void EmitTypeCheck(TypeCheckKind TCK, llvm::Value *V,
+                     QualType Type, CharUnits Alignment = CharUnits::Zero());
 
   llvm::Value *EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
                                        bool isInc, bool isPre);
@@ -1981,7 +2002,6 @@ public:
   void EmitCaseStmt(const CaseStmt &S);
   void EmitCaseStmtRange(const CaseStmt &S);
   void EmitAsmStmt(const AsmStmt &S);
-  void EmitMSAsmStmt(const MSAsmStmt &S);
 
   void EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S);
   void EmitObjCAtTryStmt(const ObjCAtTryStmt &S);
@@ -2033,11 +2053,10 @@ public:
   ///
   LValue EmitLValue(const Expr *E);
 
-  /// EmitCheckedLValue - Same as EmitLValue but additionally we generate
-  /// checking code to guard against undefined behavior.  This is only
-  /// suitable when we know that the address will be used to access the
-  /// object.
-  LValue EmitCheckedLValue(const Expr *E);
+  /// \brief Same as EmitLValue but additionally we generate checking code to
+  /// guard against undefined behavior.  This is only suitable when we know
+  /// that the address will be used to access the object.
+  LValue EmitCheckedLValue(const Expr *E, TypeCheckKind TCK);
 
   /// EmitToMemory - Change a scalar value from its value
   /// representation to its in-memory representation.
@@ -2162,9 +2181,6 @@ public:
 
   llvm::Value *EmitIvarOffset(const ObjCInterfaceDecl *Interface,
                               const ObjCIvarDecl *Ivar);
-  LValue EmitLValueForAnonRecordField(llvm::Value* Base,
-                                      const IndirectFieldDecl* Field,
-                                      unsigned CVRQualifiers);
   LValue EmitLValueForField(LValue Base, const FieldDecl* Field);
 
   /// EmitLValueForFieldInitialization - Like EmitLValueForField, except that
@@ -2519,9 +2535,9 @@ public:
   void EmitBranchOnBoolExpr(const Expr *Cond, llvm::BasicBlock *TrueBlock,
                             llvm::BasicBlock *FalseBlock);
 
-  /// getTrapBB - Create a basic block that will call the trap intrinsic.  We'll
-  /// generate a branch around the created basic block as necessary.
-  llvm::BasicBlock *getTrapBB();
+  /// \brief Create a basic block that will call the trap intrinsic, and emit a
+  /// conditional branch to it.
+  void EmitCheck(llvm::Value *Checked);
 
   /// EmitCallArg - Emit a single call argument.
   void EmitCallArg(CallArgList &args, const Expr *E, QualType ArgType);
@@ -2556,12 +2572,10 @@ private:
                         SmallVector<llvm::Value*, 16> &Args,
                         llvm::FunctionType *IRFuncTy);
 
-  llvm::Value* EmitAsmInput(const AsmStmt &S,
-                            const TargetInfo::ConstraintInfo &Info,
+  llvm::Value* EmitAsmInput(const TargetInfo::ConstraintInfo &Info,
                             const Expr *InputExpr, std::string &ConstraintStr);
 
-  llvm::Value* EmitAsmInputLValue(const AsmStmt &S,
-                                  const TargetInfo::ConstraintInfo &Info,
+  llvm::Value* EmitAsmInputLValue(const TargetInfo::ConstraintInfo &Info,
                                   LValue InputValue, QualType InputType,
                                   std::string &ConstraintStr);
 
@@ -2627,15 +2641,9 @@ private:
 
   void AddObjCARCExceptionMetadata(llvm::Instruction *Inst);
 
-  /// GetPointeeAlignment - Given an expression with a pointer type, find the
-  /// alignment of the type referenced by the pointer.  Skip over implicit
-  /// casts.
-  unsigned GetPointeeAlignment(const Expr *Addr);
-
-  /// GetPointeeAlignmentValue - Given an expression with a pointer type, find
-  /// the alignment of the type referenced by the pointer.  Skip over implicit
-  /// casts.  Return the alignment as an llvm::Value.
-  llvm::Value *GetPointeeAlignmentValue(const Expr *Addr);
+  /// GetPointeeAlignment - Given an expression with a pointer type, emit the
+  /// value and compute our best estimate of the alignment of the pointee.
+  std::pair<llvm::Value*, unsigned> EmitPointerWithAlignment(const Expr *Addr);
 };
 
 /// Helper class with most of the code for saving a value for a

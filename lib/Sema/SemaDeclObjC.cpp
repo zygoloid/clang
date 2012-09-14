@@ -282,34 +282,29 @@ void Sema::AddAnyMethodToGlobalPool(Decl *D) {
     AddFactoryMethodToGlobalPool(MDecl, true);
 }
 
-/// ActOnStartOfObjCMethodOrCFunctionDef - This routine sets up parameters; invisible
-/// and user declared, in the method definition's AST. This routine is also  called
-/// for C-functions defined in an Objective-c class implementation.
-void Sema::ActOnStartOfObjCMethodOrCFunctionDef(Scope *FnBodyScope, Decl *D,
-                                                bool parseMethod) {
-  assert((getCurMethodDecl() == 0 && getCurFunctionDecl() == 0) &&
-         "Method/c-function parsing confused");
-  if (!parseMethod) {
-    FunctionDecl *FDecl = dyn_cast_or_null<FunctionDecl>(D);
-    // If we don't have a valid c-function decl, simply return.
-    if (!FDecl)
-      return;
-    PushDeclContext(FnBodyScope, FDecl);
-    PushFunctionScope();
-    
-    for (FunctionDecl::param_const_iterator PI = FDecl->param_begin(),
-         E = FDecl->param_end(); PI != E; ++PI) {
-      ParmVarDecl *Param = (*PI);
-      if (!Param->isInvalidDecl() &&
-          RequireCompleteType(Param->getLocation(), Param->getType(),
-                              diag::err_typecheck_decl_incomplete_type))
-        Param->setInvalidDecl();
-      if ((*PI)->getIdentifier())
-        PushOnScopeChains(*PI, FnBodyScope);
-    }
-    return;
+/// HasExplicitOwnershipAttr - returns true when pointer to ObjC pointer
+/// has explicit ownership attribute; false otherwise.
+static bool
+HasExplicitOwnershipAttr(Sema &S, ParmVarDecl *Param) {
+  QualType T = Param->getType();
+  
+  if (const PointerType *PT = T->getAs<PointerType>()) {
+    T = PT->getPointeeType();
+  } else if (const ReferenceType *RT = T->getAs<ReferenceType>()) {
+    T = RT->getPointeeType();
+  } else {
+    return true;
   }
   
+  // If we have a lifetime qualifier, but it's local, we must have 
+  // inferred it. So, it is implicit.
+  return !T.getLocalQualifiers().hasObjCLifetime();
+}
+
+/// ActOnStartOfObjCMethodDef - This routine sets up parameters; invisible
+/// and user declared, in the method definition's AST.
+void Sema::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
+  assert((getCurMethodDecl() == 0) && "Methodparsing confused");
   ObjCMethodDecl *MDecl = dyn_cast_or_null<ObjCMethodDecl>(D);
   
   // If we don't have a valid method decl, simply return.
@@ -337,6 +332,12 @@ void Sema::ActOnStartOfObjCMethodOrCFunctionDef(Scope *FnBodyScope, Decl *D,
         RequireCompleteType(Param->getLocation(), Param->getType(),
                             diag::err_typecheck_decl_incomplete_type))
           Param->setInvalidDecl();
+    if (!Param->isInvalidDecl() &&
+        getLangOpts().ObjCAutoRefCount &&
+        !HasExplicitOwnershipAttr(*this, Param))
+      Diag(Param->getLocation(), diag::warn_arc_strong_pointer_objc_pointer) <<
+            Param->getType();
+    
     if ((*PI)->getIdentifier())
       PushOnScopeChains(*PI, FnBodyScope);
   }
@@ -369,8 +370,10 @@ void Sema::ActOnStartOfObjCMethodOrCFunctionDef(Scope *FnBodyScope, Decl *D,
   // Warn on deprecated methods under -Wdeprecated-implementations,
   // and prepare for warning on missing super calls.
   if (ObjCInterfaceDecl *IC = MDecl->getClassInterface()) {
-    if (ObjCMethodDecl *IMD = 
-          IC->lookupMethod(MDecl->getSelector(), MDecl->isInstanceMethod()))
+    ObjCMethodDecl *IMD = 
+      IC->lookupMethod(MDecl->getSelector(), MDecl->isInstanceMethod());
+    
+    if (IMD)
       DiagnoseObjCImplementedDeprecations(*this, 
                                           dyn_cast<NamedDecl>(IMD), 
                                           MDecl->getLocation(), 0);
@@ -380,11 +383,17 @@ void Sema::ActOnStartOfObjCMethodOrCFunctionDef(Scope *FnBodyScope, Decl *D,
     // Finally, in ActOnFinishFunctionBody() (SemaDecl), warn if flag is set.
     // Only do this if the current class actually has a superclass.
     if (IC->getSuperClass()) {
-      ObjCShouldCallSuperDealloc = 
+      getCurFunction()->ObjCShouldCallSuperDealloc = 
         !(Context.getLangOpts().ObjCAutoRefCount ||
           Context.getLangOpts().getGC() == LangOptions::GCOnly) &&
-        MDecl->getMethodFamily() == OMF_dealloc;
-      ObjCShouldCallSuperFinalize =
+          MDecl->getMethodFamily() == OMF_dealloc;
+      if (!getCurFunction()->ObjCShouldCallSuperDealloc) {
+        IMD = IC->getSuperClass()->lookupMethod(MDecl->getSelector(), 
+                                                MDecl->isInstanceMethod());
+        getCurFunction()->ObjCShouldCallSuperDealloc = 
+          (IMD && IMD->hasAttr<ObjCRequiresSuperAttr>());
+      }
+      getCurFunction()->ObjCShouldCallSuperFinalize =
         Context.getLangOpts().getGC() != LangOptions::NonGC &&
         MDecl->getMethodFamily() == OMF_finalize;
     }
@@ -534,7 +543,7 @@ ActOnStartClassInterface(SourceLocation AtInterfaceLoc,
 
   // Check then save referenced protocols.
   if (NumProtoRefs) {
-    IDecl->setProtocolList((ObjCProtocolDecl**)ProtoRefs, NumProtoRefs,
+    IDecl->setProtocolList((ObjCProtocolDecl*const*)ProtoRefs, NumProtoRefs,
                            ProtoLocs, Context);
     IDecl->setEndOfDefinitionLoc(EndProtoLoc);
   }
@@ -543,13 +552,13 @@ ActOnStartClassInterface(SourceLocation AtInterfaceLoc,
   return ActOnObjCContainerStartDefinition(IDecl);
 }
 
-/// ActOnCompatiblityAlias - this action is called after complete parsing of
+/// ActOnCompatibilityAlias - this action is called after complete parsing of
 /// a \@compatibility_alias declaration. It sets up the alias relationships.
-Decl *Sema::ActOnCompatiblityAlias(SourceLocation AtLoc,
-                                        IdentifierInfo *AliasName,
-                                        SourceLocation AliasLocation,
-                                        IdentifierInfo *ClassName,
-                                        SourceLocation ClassLocation) {
+Decl *Sema::ActOnCompatibilityAlias(SourceLocation AtLoc,
+                                    IdentifierInfo *AliasName,
+                                    SourceLocation AliasLocation,
+                                    IdentifierInfo *ClassName,
+                                    SourceLocation ClassLocation) {
   // Look for previous declaration of alias name
   NamedDecl *ADecl = LookupSingleName(TUScope, AliasName, AliasLocation,
                                       LookupOrdinaryName, ForRedeclaration);
@@ -676,7 +685,7 @@ Sema::ActOnStartProtocolInterface(SourceLocation AtProtoInterfaceLoc,
 
   if (!err && NumProtoRefs ) {
     /// Check then save referenced protocols.
-    PDecl->setProtocolList((ObjCProtocolDecl**)ProtoRefs, NumProtoRefs,
+    PDecl->setProtocolList((ObjCProtocolDecl*const*)ProtoRefs, NumProtoRefs,
                            ProtoLocs, Context);
   }
 
@@ -843,11 +852,11 @@ ActOnStartCategoryInterface(SourceLocation AtInterfaceLoc,
   CurContext->addDecl(CDecl);
 
   if (NumProtoRefs) {
-    CDecl->setProtocolList((ObjCProtocolDecl**)ProtoRefs, NumProtoRefs, 
+    CDecl->setProtocolList((ObjCProtocolDecl*const*)ProtoRefs, NumProtoRefs, 
                            ProtoLocs, Context);
     // Protocols in the class extension belong to the class.
     if (CDecl->IsClassExtension())
-     IDecl->mergeClassExtensionProtocolList((ObjCProtocolDecl**)ProtoRefs, 
+     IDecl->mergeClassExtensionProtocolList((ObjCProtocolDecl*const*)ProtoRefs, 
                                             NumProtoRefs, Context); 
   }
 
@@ -2459,26 +2468,49 @@ CvtQTToAstBitMask(ObjCDeclSpec::ObjCDeclQualifier PQTVal) {
 }
 
 static inline
+unsigned countAlignAttr(const AttrVec &A) {
+  unsigned count=0;
+  for (AttrVec::const_iterator i = A.begin(), e = A.end(); i != e; ++i)
+    if ((*i)->getKind() == attr::Aligned)
+      ++count;
+  return count;
+}
+
+static inline
 bool containsInvalidMethodImplAttribute(ObjCMethodDecl *IMD,
                                         const AttrVec &A) {
   // If method is only declared in implementation (private method),
   // No need to issue any diagnostics on method definition with attributes.
   if (!IMD)
     return false;
-
+  
   // method declared in interface has no attribute. 
-  // But implementation has attributes. This is invalid
+  // But implementation has attributes. This is invalid.
+  // Except when implementation has 'Align' attribute which is
+  // immaterial to method declared in interface.
   if (!IMD->hasAttrs())
-    return true;
+    return (A.size() > countAlignAttr(A));
 
   const AttrVec &D = IMD->getAttrs();
-  if (D.size() != A.size())
-    return true;
 
+  unsigned countAlignOnImpl = countAlignAttr(A);
+  if (!countAlignOnImpl && (A.size() != D.size()))
+    return true;
+  else if (countAlignOnImpl) {
+    unsigned countAlignOnDecl = countAlignAttr(D);
+    if (countAlignOnDecl && (A.size() != D.size()))
+      return true;
+    else if (!countAlignOnDecl && 
+             ((A.size()-countAlignOnImpl) != D.size()))
+      return true;
+  }
+  
   // attributes on method declaration and definition must match exactly.
   // Note that we have at most a couple of attributes on methods, so this
   // n*n search is good enough.
   for (AttrVec::const_iterator i = A.begin(), e = A.end(); i != e; ++i) {
+    if ((*i)->getKind() == attr::Aligned)
+      continue;
     bool match = false;
     for (AttrVec::const_iterator i1 = D.begin(), e1 = D.end(); i1 != e1; ++i1) {
       if ((*i)->getKind() == (*i1)->getKind()) {
@@ -2489,6 +2521,7 @@ bool containsInvalidMethodImplAttribute(ObjCMethodDecl *IMD,
     if (!match)
       return true;
   }
+  
   return false;
 }
 

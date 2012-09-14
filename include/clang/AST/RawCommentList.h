@@ -17,6 +17,11 @@ namespace clang {
 
 class ASTContext;
 class ASTReader;
+class Decl;
+
+namespace comments {
+  class FullComment;
+} // end namespace comments
 
 class RawComment {
 public:
@@ -48,6 +53,7 @@ public:
     return Kind == RCK_Merged;
   }
 
+  /// Is this comment attached to any declaration?
   bool isAttached() const LLVM_READONLY {
     return IsAttached;
   }
@@ -106,6 +112,9 @@ public:
 
     return extractBriefText(Context);
   }
+
+  /// Parse the comment, assuming it is attached to decl \c D.
+  comments::FullComment *parse(const ASTContext &Context, const Decl *D) const;
 
 private:
   SourceRange Range;
@@ -179,7 +188,7 @@ public:
 private:
   SourceManager &SourceMgr;
   std::vector<RawComment *> Comments;
-  RawComment LastComment;
+  SourceLocation PrevCommentEndLoc;
   bool OnlyWhitespaceSeen;
 
   void addCommentsToFront(const std::vector<RawComment *> &C) {

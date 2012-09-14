@@ -389,6 +389,90 @@ ABIArgInfo DefaultABIInfo::classifyReturnType(QualType RetTy) const {
           ABIArgInfo::getExtend() : ABIArgInfo::getDirect());
 }
 
+//===----------------------------------------------------------------------===//
+// le32/PNaCl bitcode ABI Implementation
+//===----------------------------------------------------------------------===//
+
+class PNaClABIInfo : public ABIInfo {
+ public:
+  PNaClABIInfo(CodeGen::CodeGenTypes &CGT) : ABIInfo(CGT) {}
+
+  ABIArgInfo classifyReturnType(QualType RetTy) const;
+  ABIArgInfo classifyArgumentType(QualType RetTy, unsigned &FreeRegs) const;
+
+  virtual void computeInfo(CGFunctionInfo &FI) const;
+  virtual llvm::Value *EmitVAArg(llvm::Value *VAListAddr, QualType Ty,
+                                 CodeGenFunction &CGF) const;
+};
+
+class PNaClTargetCodeGenInfo : public TargetCodeGenInfo {
+ public:
+  PNaClTargetCodeGenInfo(CodeGen::CodeGenTypes &CGT)
+    : TargetCodeGenInfo(new PNaClABIInfo(CGT)) {}
+};
+
+void PNaClABIInfo::computeInfo(CGFunctionInfo &FI) const {
+    FI.getReturnInfo() = classifyReturnType(FI.getReturnType());
+
+    unsigned FreeRegs = FI.getHasRegParm() ? FI.getRegParm() : 0;
+
+    for (CGFunctionInfo::arg_iterator it = FI.arg_begin(), ie = FI.arg_end();
+         it != ie; ++it)
+      it->info = classifyArgumentType(it->type, FreeRegs);
+  }
+
+llvm::Value *PNaClABIInfo::EmitVAArg(llvm::Value *VAListAddr, QualType Ty,
+                                       CodeGenFunction &CGF) const {
+  return 0;
+}
+
+ABIArgInfo PNaClABIInfo::classifyArgumentType(QualType Ty,
+                                              unsigned &FreeRegs) const {
+  if (isAggregateTypeForABI(Ty)) {
+    // Records with non trivial destructors/constructors should not be passed
+    // by value.
+    FreeRegs = 0;
+    if (isRecordWithNonTrivialDestructorOrCopyConstructor(Ty))
+      return ABIArgInfo::getIndirect(0, /*ByVal=*/false);
+
+    return ABIArgInfo::getIndirect(0);
+  }
+
+  // Treat an enum type as its underlying type.
+  if (const EnumType *EnumTy = Ty->getAs<EnumType>())
+    Ty = EnumTy->getDecl()->getIntegerType();
+
+  ABIArgInfo BaseInfo = (Ty->isPromotableIntegerType() ?
+          ABIArgInfo::getExtend() : ABIArgInfo::getDirect());
+
+  // Regparm regs hold 32 bits.
+  unsigned SizeInRegs = (getContext().getTypeSize(Ty) + 31) / 32;
+  if (SizeInRegs == 0) return BaseInfo;
+  if (SizeInRegs > FreeRegs) {
+    FreeRegs = 0;
+    return BaseInfo;
+  }
+  FreeRegs -= SizeInRegs;
+  return BaseInfo.isDirect() ?
+      ABIArgInfo::getDirectInReg(BaseInfo.getCoerceToType()) :
+      ABIArgInfo::getExtendInReg(BaseInfo.getCoerceToType());
+}
+
+ABIArgInfo PNaClABIInfo::classifyReturnType(QualType RetTy) const {
+  if (RetTy->isVoidType())
+    return ABIArgInfo::getIgnore();
+
+  if (isAggregateTypeForABI(RetTy))
+    return ABIArgInfo::getIndirect(0);
+
+  // Treat an enum type as its underlying type.
+  if (const EnumType *EnumTy = RetTy->getAs<EnumType>())
+    RetTy = EnumTy->getDecl()->getIntegerType();
+
+  return (RetTy->isPromotableIntegerType() ?
+          ABIArgInfo::getExtend() : ABIArgInfo::getDirect());
+}
+
 /// UseX86_MMXType - Return true if this is an MMX type that should use the
 /// special x86_mmx type.
 bool UseX86_MMXType(llvm::Type *IRType) {
@@ -2576,7 +2660,8 @@ public:
   bool isEABI() const {
     StringRef Env =
       getContext().getTargetInfo().getTriple().getEnvironmentName();
-    return (Env == "gnueabi" || Env == "eabi" || Env == "androideabi");
+    return (Env == "gnueabi" || Env == "eabi" ||
+            Env == "android" || Env == "androideabi");
   }
 
 private:
@@ -2757,21 +2842,21 @@ ABIArgInfo ARMABIInfo::classifyArgumentType(QualType Ty) const {
     }
   }
 
+  // Support byval for ARM.
+  if (getContext().getTypeSizeInChars(Ty) > CharUnits::fromQuantity(64) ||
+      getContext().getTypeAlign(Ty) > 64) {
+    return ABIArgInfo::getIndirect(0, /*ByVal=*/true);
+  }
+
   // Otherwise, pass by coercing to a structure of the appropriate size.
-  //
-  // FIXME: This doesn't handle alignment > 64 bits.
   llvm::Type* ElemTy;
   unsigned SizeRegs;
-  if (getContext().getTypeSizeInChars(Ty) <= CharUnits::fromQuantity(64)) {
+  // FIXME: Try to match the types of the arguments more accurately where
+  // we can.
+  if (getContext().getTypeAlign(Ty) <= 32) {
     ElemTy = llvm::Type::getInt32Ty(getVMContext());
     SizeRegs = (getContext().getTypeSize(Ty) + 31) / 32;
-  } else if (getABIKind() == ARMABIInfo::APCS) {
-    // Initial ARM ByVal support is APCS-only.
-    return ABIArgInfo::getIndirect(0, /*ByVal=*/true);
   } else {
-    // FIXME: This is kind of nasty... but there isn't much choice
-    // because most of the ARM calling conventions don't yet support
-    // byval.
     ElemTy = llvm::Type::getInt64Ty(getVMContext());
     SizeRegs = (getContext().getTypeSize(Ty) + 63) / 64;
   }
@@ -3767,6 +3852,8 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
   default:
     return *(TheTargetCodeGenInfo = new DefaultTargetCodeGenInfo(Types));
 
+  case llvm::Triple::le32:
+    return *(TheTargetCodeGenInfo = new PNaClTargetCodeGenInfo(Types));
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
     return *(TheTargetCodeGenInfo = new MIPSTargetCodeGenInfo(Types, true));
@@ -3821,6 +3908,7 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
     case llvm::Triple::DragonFly:
     case llvm::Triple::FreeBSD:
     case llvm::Triple::OpenBSD:
+    case llvm::Triple::Bitrig:
       return *(TheTargetCodeGenInfo =
                new X86_32TargetCodeGenInfo(Types, false, true, DisableMMX,
                                            false,

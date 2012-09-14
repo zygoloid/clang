@@ -57,6 +57,7 @@ BENIGN_LANGOPT(ObjCInferRelatedResultType , 1, 1,
 LANGOPT(Trigraphs         , 1, 0,"trigraphs")
 LANGOPT(BCPLComment       , 1, 0, "BCPL-style '//' comments")
 LANGOPT(Bool              , 1, 0, "bool, true, and false keywords")
+LANGOPT(WChar             , 1, CPlusPlus, "wchar_t keyword")
 BENIGN_LANGOPT(DollarIdents   , 1, 1, "'$' in identifiers")
 BENIGN_LANGOPT(AsmPreprocessor, 1, 0, "preprocessor in asm mode")
 BENIGN_LANGOPT(GNUMode        , 1, 1, "GNU extensions")
@@ -135,7 +136,7 @@ LANGOPT(DefaultFPContract , 1, 0, "FP_CONTRACT")
 LANGOPT(NoBitFieldTypeAlign , 1, 0, "bit-field type alignment")
 LANGOPT(HexagonQdsp6Compat , 1, 0, "hexagon-qdsp6 backward compatibility")
 LANGOPT(ObjCAutoRefCount , 1, 0, "Objective-C automated reference counting")
-LANGOPT(ObjCRuntimeHasWeak , 1, 0, "__weak support in the ARC runtime")
+LANGOPT(ObjCARCWeak         , 1, 0, "__weak support in the ARC runtime")
 LANGOPT(FakeAddressSpaceMap , 1, 0, "OpenCL fake address space map")
 
 LANGOPT(MRTD , 1, 0, "-mrtd calling convention")
@@ -161,6 +162,11 @@ VALUE_LANGOPT(MSCVersion, 32, 0,
               "version of Microsoft Visual C/C++")
 
 LANGOPT(ApplePragmaPack, 1, 0, "Apple gcc-compatible #pragma pack handling")
+
+BENIGN_LANGOPT(EmitMicrosoftInlineAsm , 1, 0, 
+               "Enable emission of MS-style inline assembly.")
+
+BENIGN_LANGOPT(RetainCommentsFromSystemHeaders, 1, 0, "retain documentation comments from system headers in the AST")
 
 #undef LANGOPT
 #undef VALUE_LANGOPT

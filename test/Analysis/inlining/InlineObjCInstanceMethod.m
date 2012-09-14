@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -analyze -analyzer-checker=core -analyzer-ipa=dynamic -verify %s
+// RUN: %clang_cc1 -analyze -analyzer-checker=core -analyzer-ipa=dynamic-bifurcate -verify %s
 
 #include "InlineObjCInstanceMethod.h"
 
@@ -20,16 +20,16 @@
   return 5/y; // expected-warning {{Division by zero}}
 }
 
-// Method is called on inited object.
+// Get the dynamic type info from a cast (from id to MyClass*).
 + (int)testAllocInit {
   MyClass *a = [[self alloc] init];
-  return 5/[a getInt]; // todo
+  return 5/[a getInt]; // expected-warning {{Division by zero}}
 }
 
 // Method is called on inited object.
 + (int)testAllocInit2 {
   MyClass *a = [[MyClass alloc] init];
-  return 5/[a getInt]; // todo
+  return 5/[a getInt]; // expected-warning {{Division by zero}}
 }
 
 // Method is called on a parameter.
@@ -78,3 +78,9 @@
   return 5/_attribute; // expected-warning {{Division by zero}}
 }
 @end
+
+
+// Don't crash if we don't know the receiver's region.
+void randomlyMessageAnObject(MyClass *arr[], int i) {
+  (void)[arr[i] getInt];
+}

@@ -99,6 +99,9 @@ SVal Environment::getSVal(const EnvironmentEntry &Entry,
       case Stmt::SubstNonTypeTemplateParmExprClass:
         E = cast<SubstNonTypeTemplateParmExpr>(E)->getReplacement();
         continue;
+      case Stmt::CXXDefaultArgExprClass:
+        E = cast<CXXDefaultArgExpr>(E)->getExpr();
+        continue;
       case Stmt::ObjCStringLiteralClass: {
         MemRegionManager &MRMgr = svalBuilder.getRegionManager();
         const ObjCStringLiteral *SL = cast<ObjCStringLiteral>(E);
@@ -286,7 +289,8 @@ void Environment::printAux(raw_ostream &Out, bool printLocations,
       S = (Stmt*) (((uintptr_t) S) & ((uintptr_t) ~0x1));
     }
     
-    Out << " (" << (void*) En.getLocationContext() << ',' << (void*) S << ") ";
+    Out << " (" << (const void*) En.getLocationContext() << ','
+      << (const void*) S << ") ";
     LangOptions LO; // FIXME.
     S->printPretty(Out, 0, PrintingPolicy(LO));
     Out << " : " << I.getData();

@@ -4,7 +4,6 @@ clang_tablegen(Checkers.inc -gen-clang-sa-checkers
   TARGET ClangSACheckers)
 
 add_clang_library(clangStaticAnalyzerCheckers
-  AdjustedReturnValueChecker.cpp
   AnalyzerStatsChecker.cpp
   ArrayBoundChecker.cpp
   ArrayBoundCheckerV2.cpp
@@ -29,6 +28,7 @@ add_clang_library(clangStaticAnalyzerCheckers
   DebugCheckers.cpp
   DereferenceChecker.cpp
   DivZeroChecker.cpp
+  DynamicTypePropagation.cpp
   ExprInspectionChecker.cpp
   FixedAddressChecker.cpp
   GenericTaintChecker.cpp
