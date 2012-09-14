@@ -3783,6 +3783,51 @@ Sema::CheckStaticArrayArgument(SourceLocation CallLoc,
 /// to have a function type.
 static ExprResult rebuildUnknownAnyFunction(Sema &S, Expr *fn);
 
+/// Determine whether we can expand all the packs in the given list already.
+static bool canExpandParameterPacks(ArrayRef<UnexpandedParameterPack> Packs) {
+  for (unsigned i = 0, n = Packs.size(); i != n; ++i) {
+    UnaryOperator *PackOp = Packs[i].first.dyn_cast<UnaryOperator*>();
+
+    // The only pack we can expand is a pack expression whose type is not
+    // dependent.
+    if (!PackOp || PackOp->getSubExpr()->getType()->isDependentType())
+      return false;
+  }
+
+  return true;
+}
+
+/// \brief Given a list of expressions, expand any pack expansion expressions
+/// which are expandable.
+bool
+Sema::maybeExpandParameterPacks(ArrayRef<Expr *> &Exprs,
+                                SmallVectorImpl<Expr *> &Storage) {
+  bool CanExpandAny = false;
+  for (unsigned i = 0, n = Exprs.size(); i != n; ++i) {
+    if (PackExpansionExpr *Expansion = dyn_cast<PackExpansionExpr>(Exprs[i])) {
+      Expr *Pattern = Expansion->getPattern();
+
+      SmallVector<UnexpandedParameterPack, 2> Unexpanded;
+      collectUnexpandedParameterPacks(Pattern, Unexpanded);
+      assert(!Unexpanded.empty() && "Pack expansion without parameter packs?");
+
+      if (canExpandParameterPacks(Unexpanded))
+        CanExpandAny = true;
+    }
+  }
+
+  if (CanExpandAny) {
+    MultiLevelTemplateArgumentList NoTemplateArgs;
+    // FIXME: Wrap expanded packs with some sugar indicating the pack expansion
+    // expression which they came from.
+    if (SubstExprs(Exprs.data(), Exprs.size(), false, NoTemplateArgs, Storage))
+      return true;
+    Exprs = Storage;
+  }
+
+  return false;
+}
+
 /// ActOnCallExpr - Handle a call to Fn with the specified array of arguments.
 /// This provides the location of the left/right parens and a list of comma
 /// locations.
@@ -3794,6 +3839,12 @@ Sema::ActOnCallExpr(Scope *S, Expr *Fn, SourceLocation LParenLoc,
   ExprResult Result = MaybeConvertParenListExprToParenExpr(S, Fn);
   if (Result.isInvalid()) return ExprError();
   Fn = Result.take();
+
+  // If there are expandable pack expansions in the argument list, expand them
+  // now.
+  SmallVector<Expr *, 8> ArgStorage;
+  if (maybeExpandParameterPacks(ArgExprs, ArgStorage))
+    return ExprError();
 
   if (getLangOpts().CPlusPlus) {
     // If this is a pseudo-destructor expression, build the call immediately.

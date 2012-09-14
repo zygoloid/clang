@@ -38,5 +38,10 @@ namespace Test3 {
     return f(get<...3>(t) ...);
   }
 
+  constexpr bool h() {
+    return f(get<...3>(t) ...);
+  }
+
   static_assert(g<void>(), "");
+  static_assert(h(), "");
 }

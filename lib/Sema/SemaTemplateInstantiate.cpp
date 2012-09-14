@@ -2582,7 +2582,7 @@ Sema::SubstExpr(Expr *E, const MultiLevelTemplateArgumentList &TemplateArgs) {
   return Instantiator.TransformExpr(E);
 }
 
-bool Sema::SubstExprs(Expr **Exprs, unsigned NumExprs, bool IsCall,
+bool Sema::SubstExprs(Expr * const *Exprs, unsigned NumExprs, bool IsCall,
                       const MultiLevelTemplateArgumentList &TemplateArgs,
                       SmallVectorImpl<Expr *> &Outputs) {
   if (NumExprs == 0)

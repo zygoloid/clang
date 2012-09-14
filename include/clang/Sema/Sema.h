@@ -5265,6 +5265,15 @@ public:
   /// false otherwise.
   bool containsUnexpandedParameterPacks(Declarator &D);
 
+  /// \brief Determine whether any of the expressions in the provided list are
+  /// pack expansion expressions, and if so, expand all the packs which can be
+  /// expanded. The provided ArrayRef will be updated to refer to the storage
+  /// if any pack expansions occur.
+  ///
+  /// \returns \c true if an error occurred, \c false otherwise.
+  bool maybeExpandParameterPacks(ArrayRef<Expr *> &Exprs,
+                                 SmallVectorImpl<Expr *> &Storage);
+
   //===--------------------------------------------------------------------===//
   // C++ Template Argument Deduction (C++ [temp.deduct])
   //===--------------------------------------------------------------------===//
@@ -5870,7 +5879,7 @@ public:
   /// \param Outputs Will receive all of the substituted arguments.
   ///
   /// \returns true if an error occurred, false otherwise.
-  bool SubstExprs(Expr **Exprs, unsigned NumExprs, bool IsCall,
+  bool SubstExprs(Expr * const *Exprs, unsigned NumExprs, bool IsCall,
                   const MultiLevelTemplateArgumentList &TemplateArgs,
                   SmallVectorImpl<Expr *> &Outputs);
 
