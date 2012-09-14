@@ -2230,7 +2230,8 @@ public:
            base->isTypeDependent(),
            base->isValueDependent(),
            base->isInstantiationDependent(),
-           base->containsUnexpandedParameterPack()),
+           base->containsUnexpandedParameterPack() ||
+           ty->containsUnexpandedParameterPack()),
       Base(base), MemberDecl(memberdecl), MemberDNLoc(NameInfo.getInfo()),
       MemberLoc(NameInfo.getLoc()), IsArrow(isarrow),
       HasQualifierOrFoundDecl(false), HasTemplateKWAndArgsInfo(false),

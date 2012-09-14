@@ -76,21 +76,28 @@ public:
 
   /// \brief Whether this function contains a VLA, \@try, try, C++
   /// initializer, or anything else that can't be jumped past.
-  bool HasBranchProtectedScope;
+  bool HasBranchProtectedScope : 1;
 
   /// \brief Whether this function contains any switches or direct gotos.
-  bool HasBranchIntoScope;
+  bool HasBranchIntoScope : 1;
 
   /// \brief Whether this function contains any indirect gotos.
-  bool HasIndirectGoto;
+  bool HasIndirectGoto : 1;
+
+  /// \brief Whether this function scope is permitted to contain an unexpanded
+  /// parameter pack.
+  bool MayContainUnexpandedParameterPack : 1;
+
+  /// \brief Whether this function contains an unexpanded parameter pack.
+  bool ContainsUnexpandedParameterPack : 1;
 
   /// A flag that is set when parsing a -dealloc method and no [super dealloc]
   /// call was found yet.
-  bool ObjCShouldCallSuperDealloc;
+  bool ObjCShouldCallSuperDealloc : 1;
 
   /// A flag that is set when parsing a -finalize method and no [super finalize]
   /// call was found yet.
-  bool ObjCShouldCallSuperFinalize;
+  bool ObjCShouldCallSuperFinalize : 1;
 
   /// \brief Used to determine if errors occurred in this function or block.
   DiagnosticErrorTrap ErrorTrap;
@@ -135,6 +142,8 @@ public:
       HasBranchProtectedScope(false),
       HasBranchIntoScope(false),
       HasIndirectGoto(false),
+      MayContainUnexpandedParameterPack(false),
+      ContainsUnexpandedParameterPack(false),
       ObjCShouldCallSuperDealloc(false),
       ObjCShouldCallSuperFinalize(false),
       ErrorTrap(Diag) { }
@@ -354,9 +363,6 @@ public:
   /// \brief Whether any of the capture expressions requires cleanups.
   bool ExprNeedsCleanups;
 
-  /// \brief Whether the lambda contains an unexpanded parameter pack.
-  bool ContainsUnexpandedParameterPack;
-
   /// \brief Variables used to index into by-copy array captures.
   llvm::SmallVector<VarDecl *, 4> ArrayIndexVars;
 
@@ -368,8 +374,9 @@ public:
                   CXXMethodDecl *CallOperator)
     : CapturingScopeInfo(Diag, ImpCap_None), Lambda(Lambda),
       CallOperator(CallOperator), NumExplicitCaptures(0), Mutable(false),
-      ExprNeedsCleanups(false), ContainsUnexpandedParameterPack(false)
+      ExprNeedsCleanups(false)
   {
+    MayContainUnexpandedParameterPack = true;
     Kind = SK_Lambda;
   }
 

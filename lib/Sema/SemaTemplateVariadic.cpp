@@ -68,14 +68,17 @@ namespace {
     }
 
     /// \brief Record occurrences of function and non-type template
-    /// parameter packs in an expression.
+    /// parameter packs and user-defined pack expression operators
+    /// in an expression.
     bool VisitDeclRefExpr(DeclRefExpr *E) {
       if (E->getDecl()->isParameterPack())
         Unexpanded.push_back(std::make_pair(E->getDecl(), E->getLocation()));
-      
+      if (E->getNameInfo().getName().getCXXOverloadedOperator() == OO_Pack)
+        Unexpanded.push_back(std::make_pair(E->getDecl(), E->getExprLoc()));
+
       return true;
     }
-    
+
     /// \brief Record occurrences of template template parameter packs.
     bool TraverseTemplateName(TemplateName Template) {
       if (TemplateTemplateParmDecl *TTP 
@@ -207,14 +210,13 @@ Sema::DiagnoseUnexpandedParameterPacks(SourceLocation Loc,
   if (Unexpanded.empty())
     return false;
 
-  // If we are within a lambda expression, that lambda contains an unexpanded
-  // parameter pack, and we are done.
+  // If we are within a lambda expression or pack operator, that function scope
+  // contains an unexpanded parameter pack, and we are done.
   // FIXME: Store 'Unexpanded' on the lambda so we don't need to recompute it
   // later.
   for (unsigned N = FunctionScopes.size(); N; --N) {
-    if (sema::LambdaScopeInfo *LSI =
-          dyn_cast<sema::LambdaScopeInfo>(FunctionScopes[N-1])) {
-      LSI->ContainsUnexpandedParameterPack = true;
+    if (FunctionScopes[N-1]->MayContainUnexpandedParameterPack) {
+      FunctionScopes[N-1]->ContainsUnexpandedParameterPack = true;
       return false;
     }
   }
@@ -560,7 +562,8 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
     unsigned Depth = 0, Index = 0;
     IdentifierInfo *Name;
     bool IsFunctionParameterPack = false;
-    
+    CXXMethodDecl *PackOperator = 0;
+
     if (const TemplateTypeParmType *TTP
         = i->first.dyn_cast<const TemplateTypeParmType *>()) {
       Depth = TTP->getDepth();
@@ -569,6 +572,8 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
     } else if (NamedDecl *ND = i->first.dyn_cast<NamedDecl *>()) {
       if (isa<ParmVarDecl>(ND))
         IsFunctionParameterPack = true;
+      else if (CXXMethodDecl *PO = dyn_cast<CXXMethodDecl>(ND))
+        PackOperator = PO;
       else
         llvm::tie(Depth, Index) = getDepthAndIndex(ND);        
       
@@ -599,6 +604,15 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
         ShouldExpand = false;
         continue;
       }
+    } else if (PackOperator) {
+      llvm::Optional<unsigned> NumExpansions = getNumArgumentsInExpansion(
+          PackOperator->getType()->castAs<FunctionType>()->getResultType(),
+          TemplateArgs);
+      if (!NumExpansions) {
+        ShouldExpand = false;
+        continue;
+      }
+      NewPackSize = *NumExpansions;
     } else {
       // If we don't have a template argument at this depth/index, then we 
       // cannot expand the pack expansion. Make a note of this, but we still 

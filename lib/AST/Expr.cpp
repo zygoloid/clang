@@ -273,6 +273,8 @@ void DeclRefExpr::computeDependence(ASTContext &Ctx) {
   // Is the declaration a parameter pack?
   if (getDecl()->isParameterPack())
     ExprBits.ContainsUnexpandedParameterPack = true;
+  if (getType()->containsUnexpandedParameterPack())
+    ExprBits.ContainsUnexpandedParameterPack = true;
 }
 
 DeclRefExpr::DeclRefExpr(ASTContext &Ctx,

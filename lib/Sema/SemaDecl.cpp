@@ -3667,7 +3667,8 @@ Decl *Sema::HandleDeclarator(Scope *S, Declarator &D,
   TypeSourceInfo *TInfo = GetTypeForDeclarator(D, S);
   QualType R = TInfo->getType();
 
-  if (DiagnoseUnexpandedParameterPack(D.getIdentifierLoc(), TInfo,
+  if (Name.getCXXOverloadedOperator() != OO_Pack &&
+      DiagnoseUnexpandedParameterPack(D.getIdentifierLoc(), TInfo,
                                       UPPC_DeclarationType))
     D.setInvalidType();
 
@@ -7616,6 +7617,8 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D) {
 
   // Enter a new function scope
   PushFunctionScope();
+  if (cast<NamedDecl>(D)->getDeclName().getCXXOverloadedOperator() == OO_Pack)
+    FunctionScopes.back()->MayContainUnexpandedParameterPack = true;
 
   // See if this is a redefinition.
   if (!FD->isLateTemplateParsed())
