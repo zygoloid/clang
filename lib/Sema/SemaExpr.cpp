@@ -3817,6 +3817,7 @@ Sema::maybeExpandParameterPacks(ArrayRef<Expr *> &Exprs,
   }
 
   if (CanExpandAny) {
+    LocalInstantiationScope Scope(*this, false, /*UninstantiatedScope*/true);
     MultiLevelTemplateArgumentList NoTemplateArgs;
     // FIXME: Wrap expanded packs with some sugar indicating the pack expansion
     // expression which they came from.

@@ -1286,7 +1286,7 @@ ExprResult
 TemplateInstantiator::TransformFunctionParmPackRefExpr(DeclRefExpr *E,
                                                        ParmVarDecl *PD) {
   typedef LocalInstantiationScope::DeclArgumentPack DeclArgumentPack;
-  llvm::PointerUnion<Decl *, DeclArgumentPack *> *Found
+  llvm::Optional<llvm::PointerUnion<Decl *, DeclArgumentPack *> > Found
     = getSema().CurrentInstantiationScope->findInstantiationOf(PD);
   assert(Found && "no instantiation for parameter pack");
 
@@ -2634,7 +2634,7 @@ bool Sema::Subst(const TemplateArgumentLoc *Args, unsigned NumArgs,
   return Instantiator.TransformTemplateArguments(Args, NumArgs, Result);
 }
 
-llvm::PointerUnion<Decl *, LocalInstantiationScope::DeclArgumentPack *> *
+llvm::Optional<LocalInstantiationScope::InstantiatedDecl>
 LocalInstantiationScope::findInstantiationOf(const Decl *D) {
   for (LocalInstantiationScope *Current = this; Current;
        Current = Current->Outer) {
@@ -2644,7 +2644,7 @@ LocalInstantiationScope::findInstantiationOf(const Decl *D) {
     do {
       LocalDeclsMap::iterator Found = Current->LocalDecls.find(CheckD);
       if (Found != Current->LocalDecls.end())
-        return &Found->second;
+        return Found->second;
       
       // If this is a tag declaration, it's possible that we need to look for
       // a previous declaration.
@@ -2653,7 +2653,14 @@ LocalInstantiationScope::findInstantiationOf(const Decl *D) {
       else
         CheckD = 0;
     } while (CheckD);
-    
+
+    // If this is an untransformed scope, and we didn't find the declaration,
+    // it maps to itself.
+    // FIXME: LabelDecl might still need to be instantiated (for instance,
+    // inside an expanded lambda).
+    if (Current->UntransformedScope)
+      return InstantiatedDecl(const_cast<Decl *>(D));
+
     // If we aren't combined with our outer scope, we're done. 
     if (!Current->CombineWithOuterScope)
       break;
@@ -2663,7 +2670,7 @@ LocalInstantiationScope::findInstantiationOf(const Decl *D) {
   // forward reference to a label declaration.  Return null to indicate that
   // we have an uninstantiated label.
   assert(isa<LabelDecl>(D) && "declaration not instantiated in this scope");
-  return 0;
+  return llvm::Optional<InstantiatedDecl>();
 }
 
 void LocalInstantiationScope::InstantiatedLocal(const Decl *D, Decl *Inst) {

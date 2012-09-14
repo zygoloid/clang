@@ -560,7 +560,7 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
                                                   i != end; ++i) {
     // Compute the depth and index for this parameter pack.
     unsigned Depth = 0, Index = 0;
-    IdentifierInfo *Name;
+    IdentifierInfo *Name = 0;
     bool IsFunctionParameterPack = false;
     CXXMethodDecl *PackOperator = 0;
 
@@ -592,7 +592,8 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
       // Figure out whether we're instantiating to an argument pack or not.
       typedef LocalInstantiationScope::DeclArgumentPack DeclArgumentPack;
       
-      llvm::PointerUnion<Decl *, DeclArgumentPack *> *Instantiation
+      llvm::Optional<llvm::PointerUnion<Decl *,
+                                        DeclArgumentPack *> > Instantiation
         = CurrentInstantiationScope->findInstantiationOf(
                                         i->first.get<NamedDecl *>());
       if (Instantiation->is<DeclArgumentPack *>()) {
@@ -657,11 +658,12 @@ bool Sema::CheckParameterPacksForExpansion(SourceLocation EllipsisLoc,
       //   the same number of arguments specified.
       if (HaveFirstPack)
         Diag(EllipsisLoc, diag::err_pack_expansion_length_conflict)
-          << FirstPack.first << Name << *NumExpansions << NewPackSize
+          << *NumExpansions << NewPackSize
+          << bool(FirstPack.first && Name) << FirstPack.first << Name
           << SourceRange(FirstPack.second) << SourceRange(i->second);
       else
         Diag(EllipsisLoc, diag::err_pack_expansion_length_conflict_multilevel)
-          << Name << *NumExpansions << NewPackSize
+          << *NumExpansions << NewPackSize << bool(Name) << Name
           << SourceRange(i->second);
       return true;
     }
@@ -691,7 +693,8 @@ llvm::Optional<unsigned> Sema::getNumArgumentsInExpansion(QualType T,
         // Function parameter pack.
         typedef LocalInstantiationScope::DeclArgumentPack DeclArgumentPack;
         
-        llvm::PointerUnion<Decl *, DeclArgumentPack *> *Instantiation
+        llvm::Optional<llvm::PointerUnion<Decl *,
+                                          DeclArgumentPack *> > Instantiation
           = CurrentInstantiationScope->findInstantiationOf(
                                         Unexpanded[I].first.get<NamedDecl *>());
         if (Instantiation->is<Decl*>())

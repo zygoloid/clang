@@ -3046,11 +3046,11 @@ def err_unexpanded_parameter_pack_3_or_more : Error<
 def err_pack_expansion_without_parameter_packs : Error<
   "pack expansion does not contain any unexpanded parameter packs">;
 def err_pack_expansion_length_conflict : Error<
-  "pack expansion contains parameter packs %0 and %1 that have different "
-  "lengths (%2 vs. %3)">;
+  "pack expansion contains parameter packs %select{|%3 and %4 }2"
+  "that have different lengths (%0 vs. %1)">;
 def err_pack_expansion_length_conflict_multilevel : Error<
-  "pack expansion contains parameter pack %0 that has a different "
-  "length (%1 vs. %2) from outer parameter packs">;
+  "pack expansion contains parameter pack %select{|%3 }2that has a different "
+  "length (%0 vs. %1) from outer parameter packs">;
 def err_pack_expansion_member_init : Error<
   "pack expansion for initialization of member %0">;
 

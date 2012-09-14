@@ -3414,7 +3414,7 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
     // D is a local of some kind. Look into the map of local
     // declarations to their instantiations.
     typedef LocalInstantiationScope::DeclArgumentPack DeclArgumentPack;
-    llvm::PointerUnion<Decl *, DeclArgumentPack *> *Found
+    llvm::Optional<llvm::PointerUnion<Decl *, DeclArgumentPack *> > Found
       = CurrentInstantiationScope->findInstantiationOf(D);
 
     if (Found) {

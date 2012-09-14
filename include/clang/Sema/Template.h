@@ -180,16 +180,17 @@ namespace clang {
   public:
     /// \brief A set of declarations.
     typedef SmallVector<Decl *, 4> DeclArgumentPack;
-    
+
+    /// \brief An entity which a declaration can instantiate to.
+    typedef llvm::PointerUnion<Decl *, DeclArgumentPack *> InstantiatedDecl;
+
   private:
     /// \brief Reference to the semantic analysis that is performing
     /// this template instantiation.
     Sema &SemaRef;
 
-    typedef llvm::DenseMap<const Decl *, 
-                           llvm::PointerUnion<Decl *, DeclArgumentPack *> >
-      LocalDeclsMap;
-    
+    typedef llvm::DenseMap<const Decl *, InstantiatedDecl> LocalDeclsMap;
+
     /// \brief A mapping from local declarations that occur
     /// within a template to their instantiations.
     ///
@@ -224,7 +225,11 @@ namespace clang {
     /// \brief Whether to combine this scope with the outer scope, such that
     /// lookup will search our outer scope.
     bool CombineWithOuterScope;
-    
+
+    /// \brief Whether this is an untransformed scope, in which all declarations
+    /// will be mapped to themselves.
+    bool UntransformedScope;
+
     /// \brief If non-NULL, the template parameter pack that has been
     /// partially substituted per C++0x [temp.arg.explicit]p9.
     NamedDecl *PartiallySubstitutedPack;
@@ -243,10 +248,11 @@ namespace clang {
     LocalInstantiationScope &operator=(const LocalInstantiationScope &);
 
   public:
-    LocalInstantiationScope(Sema &SemaRef, bool CombineWithOuterScope = false)
+    LocalInstantiationScope(Sema &SemaRef, bool CombineWithOuterScope = false,
+                            bool UntransformedScope = false)
       : SemaRef(SemaRef), Outer(SemaRef.CurrentInstantiationScope),
         Exited(false), CombineWithOuterScope(CombineWithOuterScope),
-        PartiallySubstitutedPack(0)
+        UntransformedScope(UntransformedScope), PartiallySubstitutedPack(0)
     {
       SemaRef.CurrentInstantiationScope = this;
     }
@@ -274,7 +280,8 @@ namespace clang {
     LocalInstantiationScope *cloneScopes(LocalInstantiationScope *Outermost) {
       if (this == Outermost) return this;
       LocalInstantiationScope *newScope =
-        new LocalInstantiationScope(SemaRef, CombineWithOuterScope);
+        new LocalInstantiationScope(SemaRef, CombineWithOuterScope,
+                                    UntransformedScope);
 
       newScope->Outer = 0;
       if (Outer)
@@ -288,8 +295,7 @@ namespace clang {
       for (LocalDeclsMap::iterator I = LocalDecls.begin(), E = LocalDecls.end();
            I != E; ++I) {
         const Decl *D = I->first;
-        llvm::PointerUnion<Decl *, DeclArgumentPack *> &Stored =
-          newScope->LocalDecls[D];
+        InstantiatedDecl &Stored = newScope->LocalDecls[D];
         if (I->second.is<Decl *>()) {
           Stored = I->second.get<Decl *>();
         } else {
@@ -321,8 +327,7 @@ namespace clang {
     /// \returns A pointer to the declaration or argument pack of declarations
     /// to which the declaration \c D is instantiataed, if found. Otherwise,
     /// returns NULL.
-    llvm::PointerUnion<Decl *, DeclArgumentPack *> *
-    findInstantiationOf(const Decl *D);
+    llvm::Optional<InstantiatedDecl> findInstantiationOf(const Decl *D);
 
     void InstantiatedLocal(const Decl *D, Decl *Inst);
     void InstantiatedLocalPackArg(const Decl *D, Decl *Inst);
