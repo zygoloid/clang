@@ -4238,6 +4238,12 @@ Sema::BuildCompoundLiteralExpr(SourceLocation LParenLoc, TypeSourceInfo *TInfo,
 ExprResult
 Sema::ActOnInitList(SourceLocation LBraceLoc, MultiExprArg InitArgList,
                     SourceLocation RBraceLoc) {
+  // Transform any pack expansions which can be expanded into a list of
+  // expressions.
+  llvm::SmallVector<Expr *, 4> Storage;
+  if (maybeExpandParameterPacks(InitArgList, Storage))
+    return ExprError();
+
   // Immediately handle non-overload placeholders.  Overloads can be
   // resolved contextually, but everything else here can't.
   for (unsigned I = 0, E = InitArgList.size(); I != E; ++I) {
@@ -4585,6 +4591,7 @@ ExprResult Sema::BuildVectorLiteral(SourceLocation LParenLoc,
   if (ParenListExpr *PE = dyn_cast<ParenListExpr>(E)) {
     exprs = PE->getExprs();
     numExprs = PE->getNumExprs();
+    // FIXME: Pack expansions here?
   } else {
     subExpr = cast<ParenExpr>(E)->getSubExpr();
     exprs = &subExpr;

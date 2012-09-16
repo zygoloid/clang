@@ -810,6 +810,10 @@ Sema::BuildCXXTypeConstructExpr(TypeSourceInfo *TInfo,
   QualType Ty = TInfo->getType();
   SourceLocation TyBeginLoc = TInfo->getTypeLoc().getBeginLoc();
 
+  llvm::SmallVector<Expr *, 4> Storage;
+  if (maybeExpandParameterPacks(exprs, Storage))
+    return ExprError();
+
   if (Ty->isDependentType() || CallExpr::hasAnyTypeDependentArguments(exprs)) {
     return Owned(CXXUnresolvedConstructExpr::Create(Context, TInfo,
                                                     LParenLoc,
@@ -1053,6 +1057,10 @@ Sema::BuildCXXNew(SourceLocation StartLoc, bool UseGlobal,
                   bool TypeMayContainAuto) {
   SourceRange TypeRange = AllocTypeInfo->getTypeLoc().getSourceRange();
 
+  llvm::SmallVector<Expr *, 4> PlacementArgStorage;
+  if (maybeExpandParameterPacks(PlacementArgs, PlacementArgStorage))
+    return ExprError();
+
   CXXNewExpr::InitializationStyle initStyle;
   if (DirectInitRange.isValid()) {
     assert(Initializer && "Have parens but no initializer.");
@@ -1073,34 +1081,37 @@ Sema::BuildCXXNew(SourceLocation StartLoc, bool UseGlobal,
     initStyle = CXXNewExpr::NoInit;
   }
 
-  Expr **Inits = &Initializer;
-  unsigned NumInits = Initializer ? 1 : 0;
+  MultiExprArg Inits;
+  llvm::SmallVector<Expr *, 4> InitStorage;
+  if (Initializer)
+    Inits = Initializer;
   if (initStyle == CXXNewExpr::CallInit) {
     if (ParenListExpr *List = dyn_cast<ParenListExpr>(Initializer)) {
-      Inits = List->getExprs();
-      NumInits = List->getNumExprs();
+      Inits = MultiExprArg(List->getExprs(), List->getNumExprs());
     } else if (CXXConstructExpr *CCE = dyn_cast<CXXConstructExpr>(Initializer)){
-      if (!isa<CXXTemporaryObjectExpr>(CCE)) {
+      if (!isa<CXXTemporaryObjectExpr>(CCE))
         // Can happen in template instantiation. Since this is just an implicit
         // construction, we just take it apart and rebuild it.
-        Inits = CCE->getArgs();
-        NumInits = CCE->getNumArgs();
-      }
+        Inits = MultiExprArg(CCE->getArgs(), CCE->getNumArgs());
     }
   }
+
+  // Replace any expandable pack expansions with their expanded values.
+  if (maybeExpandParameterPacks(Inits, InitStorage))
+    return ExprError();
 
   // C++11 [decl.spec.auto]p6. Deduce the type which 'auto' stands in for.
   AutoType *AT = 0;
   if (TypeMayContainAuto &&
       (AT = AllocType->getContainedAutoType()) && !AT->isDeduced()) {
-    if (initStyle == CXXNewExpr::NoInit || NumInits == 0)
+    if (initStyle == CXXNewExpr::NoInit || Inits.empty())
       return ExprError(Diag(StartLoc, diag::err_auto_new_requires_ctor_arg)
                        << AllocType << TypeRange);
     if (initStyle == CXXNewExpr::ListInit)
       return ExprError(Diag(Inits[0]->getLocStart(),
                             diag::err_auto_new_requires_parens)
                        << AllocType << TypeRange);
-    if (NumInits > 1) {
+    if (Inits.size() > 1) {
       Expr *FirstBad = Inits[1];
       return ExprError(Diag(FirstBad->getLocStart(),
                             diag::err_auto_new_ctor_multiple_expressions)
@@ -1352,8 +1363,8 @@ Sema::BuildCXXNew(SourceLocation StartLoc, bool UseGlobal,
   // dialect distinction.
   if (ResultType->isArrayType() || ArraySize) {
     if (!isLegalArrayNewInitializer(initStyle, Initializer)) {
-      SourceRange InitRange(Inits[0]->getLocStart(),
-                            Inits[NumInits - 1]->getLocEnd());
+      SourceRange InitRange(Inits.front()->getLocStart(),
+                            Inits.back()->getLocEnd());
       Diag(StartLoc, diag::err_new_array_init_args) << InitRange;
       return ExprError();
     }
@@ -1369,8 +1380,7 @@ Sema::BuildCXXNew(SourceLocation StartLoc, bool UseGlobal,
   }
 
   if (!AllocType->isDependentType() &&
-      !Expr::hasAnyTypeDependentArguments(
-        llvm::makeArrayRef(Inits, NumInits))) {
+      !Expr::hasAnyTypeDependentArguments(Inits)) {
     // C++11 [expr.new]p15:
     //   A new-expression that creates an object of type T initializes that
     //   object as follows:
@@ -1390,9 +1400,9 @@ Sema::BuildCXXNew(SourceLocation StartLoc, bool UseGlobal,
 
     InitializedEntity Entity
       = InitializedEntity::InitializeNew(StartLoc, InitType);
-    InitializationSequence InitSeq(*this, Entity, Kind, Inits, NumInits);
-    ExprResult FullInit = InitSeq.Perform(*this, Entity, Kind,
-                                          MultiExprArg(Inits, NumInits));
+    InitializationSequence InitSeq(*this, Entity, Kind,
+                                   Inits.data(), Inits.size());
+    ExprResult FullInit = InitSeq.Perform(*this, Entity, Kind, Inits);
     if (FullInit.isInvalid())
       return ExprError();
 

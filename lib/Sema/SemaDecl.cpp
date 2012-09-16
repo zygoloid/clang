@@ -6390,6 +6390,16 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     CheckSelfReference(RealDecl, Init);
 
   ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
+  MultiExprArg DirectInitArgs;
+  llvm::SmallVector<Expr *, 4> DirectInitStorage;
+  if (CXXDirectInit) {
+    DirectInitArgs = MultiExprArg(CXXDirectInit->getExprs(),
+                                  CXXDirectInit->getNumExprs());
+    if (maybeExpandParameterPacks(DirectInitArgs, DirectInitStorage)) {
+      RealDecl->setInvalidDecl();
+      return;
+    }
+  }
 
   // C++11 [decl.spec.auto]p6. Deduce the type which 'auto' stands in for.
   AutoType *Auto = 0;
@@ -6400,7 +6410,7 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     // Initializer could be a C++ direct-initializer. Deduction only works if it
     // contains exactly one expression.
     if (CXXDirectInit) {
-      if (CXXDirectInit->getNumExprs() == 0) {
+      if (DirectInitArgs.empty()) {
         // It isn't possible to write this directly, but it is possible to
         // end up in this situation with "auto x(some_pack...);"
         Diag(CXXDirectInit->getLocStart(),
@@ -6409,16 +6419,16 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
           << VDecl->getSourceRange();
         RealDecl->setInvalidDecl();
         return;
-      } else if (CXXDirectInit->getNumExprs() > 1) {
-        Diag(CXXDirectInit->getExpr(1)->getLocStart(),
+      }
+      if (DirectInitArgs.size() > 1) {
+        Diag(DirectInitArgs[1]->getLocStart(),
              diag::err_auto_var_init_multiple_expressions)
           << VDecl->getDeclName() << VDecl->getType()
           << VDecl->getSourceRange();
         RealDecl->setInvalidDecl();
         return;
-      } else {
-        DeduceInit = CXXDirectInit->getExpr(0);
       }
+      DeduceInit = DirectInitArgs[0];
     }
     TypeSourceInfo *DeducedType = 0;
     if (DeduceAutoType(VDecl->getTypeSourceInfo(), DeduceInit, DeducedType) ==
@@ -6556,15 +6566,12 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
                    : InitializationKind::CreateCopy(VDecl->getLocation(),
                                                     Init->getLocStart());
 
-    Expr **Args = &Init;
-    unsigned NumArgs = 1;
-    if (CXXDirectInit) {
-      Args = CXXDirectInit->getExprs();
-      NumArgs = CXXDirectInit->getNumExprs();
-    }
-    InitializationSequence InitSeq(*this, Entity, Kind, Args, NumArgs);
-    ExprResult Result = InitSeq.Perform(*this, Entity, Kind,
-                                        MultiExprArg(Args, NumArgs), &DclT);
+    MultiExprArg Args = Init;
+    if (CXXDirectInit)
+      Args = DirectInitArgs;
+    InitializationSequence InitSeq(*this, Entity, Kind,
+                                   Args.data(), Args.size());
+    ExprResult Result = InitSeq.Perform(*this, Entity, Kind, Args, &DclT);
     if (Result.isInvalid()) {
       VDecl->setInvalidDecl();
       return;

@@ -81,7 +81,7 @@ namespace Test4 {
                                  std::make_tuple(7, 8, 9))) ...) == 159, "");
 }
 
-namespace Test5 {
+namespace DifferentLengths {
   template<typename...Ts> int g(Ts...);
   template<int N, typename...Ts> int f(Ts ...ts) {
     g(ts + ...N + ... 3 ...); // \
@@ -102,7 +102,59 @@ namespace Test5 {
   int test7 = f<3>(... 3 ...);
 }
 
-namespace Test6 {
+namespace PackInPack {
   int f(int, int);
   int k = f(...(... 2)...); // expected-error {{contains an unexpanded parameter pack}}
+}
+
+namespace InitLists {
+  struct A { int n; int arr[3]; int m; };
+  constexpr A a_err { ... 5 ... }; // expected-error {{cannot omit braces}}
+  constexpr A a = { ... 5 ... };
+  constexpr A b { 1, { ... 3 ... }, 1 };
+  constexpr A c = { ... 6 ... }; // expected-error {{excess elements}}
+  static_assert(a.arr[1] == 2, "");
+  static_assert(b.arr[1] == 1, "");
+  static_assert(A{1, { ... 3 * 3 ... }, 1}.arr[2] == 6, "");
+
+  struct B { A a; constexpr B() : a{ 1, {... 3 ...}, 2 } {} };
+  static_assert(B{}.a.m == 2 && B{}.a.arr[2] == 2, "");
+
+  constexpr int arr[] = { ... 20 ... };
+  static_assert(sizeof(arr) == 20 * sizeof(int), "");
+  static_assert(arr[19] == 19, "");
+
+  constexpr int lut[] = { ... 100 % 7 ... };
+  static_assert(sizeof(lut) == 100 * sizeof(int), "");
+  static_assert(lut[6] == 6, "");
+  static_assert(lut[7] == 0, "");
+}
+
+void *operator new(decltype(sizeof(0)), int, int, int); // xpected-note {{candidate}}
+namespace New {
+  int *p1 = new (... 3 ...) int;
+  // FIXME: This produces a note with no source location, which we can't
+  //        match with -verify.
+  //int *p2 = new (... 4 ...) int; // xpected-error {{no matching function}}
+  struct S { S(int, int, int); }; // expected-note 3{{candidate}}
+  S *p3 = new S(... 3 ...);
+  S *p4 = new S(... 4 ...); // expected-error {{no matching constructor}}
+}
+
+namespace Construct {
+  static_assert(int(5 + ... 0 ...) == 0, "");
+  static_assert(int(5 + ... 1 ...) == 5, "");
+  static_assert(int(5 + ... 2 ...) == 5, ""); // expected-error {{excess elements in scalar init}}
+  struct S { S(int, int, int); }; // expected-note 6{{not viable}}
+  S s1 = S(... 3 ...);
+  S s2 = S(... 4 ...); // expected-error {{no matching}}
+  S s3(... 3 ...);
+  S s4(... 4 ...); // expected-error {{no matching}}
+
+  struct T {
+    S s;
+    T() : s(... 3 ...) {}
+    // FIXME: reject this!
+    T(int) : s(... 4 ...) {}
+  };
 }
