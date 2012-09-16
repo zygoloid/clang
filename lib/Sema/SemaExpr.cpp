@@ -8902,6 +8902,11 @@ ExprResult Sema::BuildUnaryOp(Scope *S, SourceLocation OpLoc,
     Input = Result.take();
   }
 
+  // FIXME: We should have a custom "unexpanded parameter pack cannot appear in
+  // a pack expression" diagnostic for this.
+  if (Opc == UO_Pack)
+    DiagnoseUnexpandedParameterPack(Input);
+
   if (getLangOpts().CPlusPlus && Input->getType()->isOverloadableType() &&
       UnaryOperator::getOverloadedOperator(Opc) != OO_None &&
       !(Opc == UO_AddrOf && isQualifiedMemberAccess(Input))) {

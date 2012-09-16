@@ -101,3 +101,8 @@ namespace Test5 {
   int test6 = f<4>(... 3 ...); // expected-note {{here}}
   int test7 = f<3>(... 3 ...);
 }
+
+namespace Test6 {
+  int f(int, int);
+  int k = f(...(... 2)...); // expected-error {{contains an unexpanded parameter pack}}
+}
