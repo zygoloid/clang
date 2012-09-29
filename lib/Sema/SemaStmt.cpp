@@ -2385,14 +2385,61 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   return Owned(Result);
 }
 
+bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD, Expr *&RetExpr,
+                                            AutoType *AT) {
+  const FunctionProtoType *FPT = FD->getType()->castAs<FunctionProtoType>();
+
+  QualType Deduced;
+  DeduceAutoResult DAR = DeduceAutoType(FPT->getResultType(), RetExpr, Deduced);
+
+  if (DAR == DAR_Failed && !FD->isInvalidDecl()) {
+    // FIXME: Use the original return type here, not the return type as adjusted
+    // by prior return statements.
+    if (isa<InitListExpr>(RetExpr))
+      Diag(RetExpr->getExprLoc(),
+           diag::err_auto_fn_deduction_failure_from_init_list)
+        << FD << FPT->getResultType();
+    else
+      Diag(RetExpr->getExprLoc(), diag::err_auto_fn_deduction_failure)
+        << FD << FPT->getResultType() << RetExpr->getType();
+  }
+
+  if (DAR != DAR_Succeeded)
+    return true;
+
+  if (AT->isDeduced() && !Context.hasSameType(AT->getDeducedType(), Deduced)) {
+    Diag(RetExpr->getExprLoc(), diag::err_auto_fn_different_deductions)
+      << Deduced << AT->getDeducedType();
+    return true;
+  }
+
+  FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+  FD->setType(Context.getFunctionType(Deduced, FPT->arg_type_begin(),
+                                      FPT->getNumArgs(), EPI));
+  return false;
+}
+
 StmtResult
 Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   // Check for unexpanded parameter packs.
   if (RetValExp && DiagnoseUnexpandedParameterPack(RetValExp))
     return StmtError();
 
+  // FIXME: Unify this and C++1y auto function handling. In particular, we
+  // should allow 'return { 1, 2, 3 };' in a lambda to deduce
+  // 'std::initializer_list<int>'.
   if (isa<CapturingScopeInfo>(getCurFunction()))
     return ActOnCapScopeReturnStmt(ReturnLoc, RetValExp);
+
+  // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
+  // deduction.
+  if (getLangOpts().CPlusPlus1y)
+    if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CurContext))
+      if (AutoType *AT = FD->getResultType()->getContainedAutoType())
+        if (DeduceFunctionTypeFromReturnExpr(FD, RetValExp, AT)) {
+          FD->setInvalidDecl();
+          return StmtError();
+        }
 
   QualType FnRetType;
   QualType RelatedRetType;

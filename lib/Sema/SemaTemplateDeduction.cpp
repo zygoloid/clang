@@ -3573,7 +3573,6 @@ namespace {
         break;
       }
     }
-    assert(Ty->getAs<AutoType>() && "didn't find 'auto' in auto type");
     return false;
   }
 }
@@ -3590,15 +3589,15 @@ namespace {
 /// substitution failed; the appropriate diagnostic will already have been
 /// produced in that case.
 Sema::DeduceAutoResult
-Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
-                     TypeSourceInfo *&Result) {
+Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
+                     TypeSourceInfo **TSI) {
   if (Init->getType()->isNonOverloadPlaceholderType()) {
     ExprResult result = CheckPlaceholderExpr(Init);
     if (result.isInvalid()) return DAR_FailedAlreadyDiagnosed;
     Init = result.take();
   }
 
-  if (Init->isTypeDependent() || isDependentAutoType(Type->getType())) {
+  if (Init->isTypeDependent() || isDependentAutoType(Type)) {
     Result = Type;
     return DAR_Succeeded;
   }
@@ -3616,10 +3615,10 @@ Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
   FixedSizeTemplateParameterList<1> TemplateParams(Loc, Loc, &TemplParamPtr,
                                                    Loc);
 
-  TypeSourceInfo *FuncParamInfo =
+  QualType FuncParam =
     SubstituteAutoTransform(*this, TemplArg).TransformType(Type);
-  assert(FuncParamInfo && "substituting template parameter for 'auto' failed");
-  QualType FuncParam = FuncParamInfo->getType();
+  assert(!FuncParam.isNull() &&
+         "substituting template parameter for 'auto' failed");
 
   // Deduce type of TemplParam in Func(Init)
   SmallVector<DeducedTemplateArgument, 1> Deduced;
@@ -3659,19 +3658,38 @@ Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
       return DAR_FailedAlreadyDiagnosed;
   }
 
-  Result = SubstituteAutoTransform(*this, DeducedType).TransformType(Type);
+  if (TSI) {
+    *TSI = SubstituteAutoTransform(*this, DeducedType).TransformType(*TSI);
+    if (!*TSI)
+      return DAR_FailedAlreadyDiagnosed;
+    Result = (*TSI)->getType();
+  } else {
+    Result = SubstituteAutoTransform(*this, DeducedType).TransformType(Type);
+  }
+
+  if (Result.isNull())
+    return DAR_FailedAlreadyDiagnosed;
 
   // Check that the deduced argument type is compatible with the original
   // argument type per C++ [temp.deduct.call]p4.
-  if (!InitList && Result &&
-      CheckOriginalCallArgDeduction(*this, 
+  if (!InitList &&
+      CheckOriginalCallArgDeduction(*this,
                                     Sema::OriginalCallArg(FuncParam,0,InitType),
-                                    Result->getType())) {
-    Result = 0;
+                                    Result))
     return DAR_Failed;
-  }
 
   return DAR_Succeeded;
+}
+
+Sema::DeduceAutoResult
+Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
+                     TypeSourceInfo *&Result) {
+  QualType DeducedType;
+  DeduceAutoResult DAR = DeduceAutoType(Type->getType(), Init,
+                                        DeducedType, &Type);
+  if (DAR == DAR_Succeeded)
+    Result = Type;
+  return DAR;
 }
 
 void Sema::DiagnoseAutoDeductionFailure(VarDecl *VDecl, Expr *Init) {
