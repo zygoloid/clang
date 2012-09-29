@@ -1357,15 +1357,8 @@ def err_auto_var_deduction_failure_from_init_list : Error<
   "cannot deduce actual type for variable %0 with type %1 from initializer list">;
 def err_auto_new_deduction_failure : Error<
   "new expression for type %0 has incompatible constructor argument of type %1">;
-def err_auto_fn_deduction_failure : Error<
-  "function %0 with return type %1 has incompatible return value of type %2">;
-def err_auto_fn_deduction_failure_from_init_list : Error<
-  "cannot deduce return type for function %0 with specified return type %1 "
-  "from initializer list">;
 def err_auto_different_deductions : Error<
   "'auto' deduced as %0 in declaration of %1 and deduced as %2 in declaration of %3">;
-def err_auto_fn_different_deductions : Error<
-  "'auto' deduced as %0 here but deduced as %1 in earlier return statement">;
 def err_implied_std_initializer_list_not_found : Error<
   "cannot deduce type of initializer list because std::initializer_list was "
   "not found; include <initializer_list>">;
@@ -1375,6 +1368,17 @@ def warn_dangling_std_initializer_list : Warning<
   "array backing the initializer list will be destroyed at the end of "
   "%select{the full-expression|the constructor}0">,
   InGroup<DiagGroup<"dangling-initializer-list">>;
+
+// C++1y auto type
+def err_auto_fn_deduction_failure : Error<
+  "function %0 with return type %1 has incompatible return value of type %2">;
+def err_auto_fn_deduction_failure_from_init_list : Error<
+  "cannot deduce return type for function %0 with specified return type %1 "
+  "from initializer list">;
+def err_auto_fn_different_deductions : Error<
+  "'auto' deduced as %0 here but deduced as %1 in earlier return statement">;
+def err_auto_fn_used_before_defined : Error<
+  "function %0 with deduced return type cannot be used before it is defined">;
 
 // C++11 override control
 def override_keyword_only_allowed_on_virtual_member_functions : Error<

@@ -270,6 +270,15 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, SourceLocation Loc,
       NoteDeletedFunction(FD);
       return true;
     }
+
+    if (getLangOpts().CPlusPlus1y) {
+      AutoType *AT = FD->getResultType()->getContainedAutoType();
+      if (AT && !AT->isDeduced()) {
+        Diag(Loc, diag::err_auto_fn_used_before_defined) << D;
+        Diag(D->getLocation(), diag::note_callee_decl) << D;
+        return true;
+      }
+    }
   }
   DiagnoseAvailabilityOfDecl(*this, D, Loc, UnknownObjCClass);
 

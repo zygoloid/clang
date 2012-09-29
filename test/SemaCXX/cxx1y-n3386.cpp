@@ -58,16 +58,26 @@ auto init_list_3() {
   return { 1, 2, 3.0 }; // expected-error {{cannot deduce return type for function 'init_list_3' with specified return type 'auto' from initializer list}}
 }
 
+auto fwd_decl(); // expected-note 2{{here}}
+
+int n = fwd_decl(); // expected-error {{function 'fwd_decl' with deduced return type cannot be used before it is defined}}
+int k = sizeof(fwd_decl()); // expected-error {{used before it is defined}}
+
 auto fac(int n) {
   if (n <= 2)
     return n;
   return n * fac(n-1); // ok
 }
 
-#if 0
-auto fac_2(int n) {
+auto fac_2(int n) { // expected-note {{declared here}}
   if (n > 2)
     return n * fac_2(n-1); // expected-error {{cannot be used before it is defined}}
   return n;
 }
+
+#if 0
+auto fwd_decl_using();
+namespace N { using ::fwd_decl_using; }
+auto fwd_decl_using() { return 0; }
+namespace N { int k = N::fwd_decl_using(); }
 #endif
