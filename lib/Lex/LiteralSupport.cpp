@@ -781,7 +781,8 @@ bool NumericLiteralParser::GetIntegerValue(llvm::APInt &Val) {
   if (alwaysFitsInto64Bits(radix, NumDigits)) {
     uint64_t N = 0;
     for (const char *Ptr = DigitsBegin; Ptr != SuffixBegin; ++Ptr)
-      N = N * radix + HexDigitValue(*Ptr);
+      if (*Ptr != '\'')
+        N = N * radix + HexDigitValue(*Ptr);
 
     // This will truncate the value to Val's input width. Simply check
     // for overflow by comparing.
@@ -798,6 +799,11 @@ bool NumericLiteralParser::GetIntegerValue(llvm::APInt &Val) {
 
   bool OverflowOccurred = false;
   while (Ptr < SuffixBegin) {
+    if (*Ptr == '\'') {
+      ++Ptr;
+      continue;
+    }
+
     unsigned C = HexDigitValue(*Ptr++);
 
     // If this letter is out of bound for this radix, reject it.
@@ -826,6 +832,7 @@ NumericLiteralParser::GetFloatValue(llvm::APFloat &Result) {
   using llvm::APFloat;
 
   unsigned n = std::min(SuffixBegin - ThisTokBegin, ThisTokEnd - ThisTokBegin);
+  // FIXME: Teach APFloat to skip apostrophes.
   return Result.convertFromString(StringRef(ThisTokBegin, n),
                                   APFloat::rmNearestTiesToEven);
 }

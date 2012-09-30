@@ -101,7 +101,7 @@ private:
   /// SkipHexDigits - Read and skip over any hex digits, up to End.
   /// Return a pointer to the first non-hex digit or End.
   const char *SkipHexDigits(const char *ptr) {
-    while (ptr != ThisTokEnd && isxdigit(*ptr))
+    while (ptr != ThisTokEnd && (isxdigit(*ptr) || *ptr == '\''))
       ptr++;
     return ptr;
   }
@@ -109,7 +109,8 @@ private:
   /// SkipOctalDigits - Read and skip over any octal digits, up to End.
   /// Return a pointer to the first non-hex digit or End.
   const char *SkipOctalDigits(const char *ptr) {
-    while (ptr != ThisTokEnd && ((*ptr >= '0') && (*ptr <= '7')))
+    while (ptr != ThisTokEnd &&
+           ((*ptr >= '0' && *ptr <= '7') || *ptr == '\''))
       ptr++;
     return ptr;
   }
@@ -117,7 +118,7 @@ private:
   /// SkipDigits - Read and skip over any digits, up to End.
   /// Return a pointer to the first non-hex digit or End.
   const char *SkipDigits(const char *ptr) {
-    while (ptr != ThisTokEnd && isdigit(*ptr))
+    while (ptr != ThisTokEnd && (isdigit(*ptr) || *ptr == '\''))
       ptr++;
     return ptr;
   }
@@ -125,7 +126,7 @@ private:
   /// SkipBinaryDigits - Read and skip over any binary digits, up to End.
   /// Return a pointer to the first non-binary digit or End.
   const char *SkipBinaryDigits(const char *ptr) {
-    while (ptr != ThisTokEnd && (*ptr == '0' || *ptr == '1'))
+    while (ptr != ThisTokEnd && (*ptr == '0' || *ptr == '1' || *ptr == '\''))
       ptr++;
     return ptr;
   }

@@ -1,0 +1,2 @@
+The proposed wording appears to be incorrect: it does not treat 0xdead'beef as
+a pp-number, because the ' is not followed by a digit.

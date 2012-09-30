@@ -1580,6 +1580,11 @@ void Lexer::LexNumericConstant(Token &Result, const char *CurPtr) {
       return LexNumericConstant(Result, ConsumeChar(CurPtr, Size, Result));
   }
 
+  // FIXME: N3448 intends to allow 0xdead'beef, but fails due to this check.
+  if (getLangOpts().CPlusPlus1y && C == '\'' &&
+      CurPtr[Size] >= '0' && CurPtr[Size] <= '9')
+    return LexNumericConstant(Result, ConsumeChar(CurPtr, Size, Result));
+
   // Update the location of token as well as BufferPtr.
   const char *TokStart = BufferPtr;
   FormTokenWithChars(Result, CurPtr, tok::numeric_constant);
