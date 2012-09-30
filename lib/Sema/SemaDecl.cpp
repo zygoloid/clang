@@ -7812,6 +7812,21 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
   if (FD) {
     FD->setBody(Body);
 
+    if (getLangOpts().CPlusPlus1y && !FD->isInvalidDecl()) {
+      AutoType *AT = FD->getResultType()->getContainedAutoType();
+      if (AT && !AT->isDeduced()) {
+        // If the function has a deduced result type but contains no 'return'
+        // statements, the result type as written must be exactly 'auto', and
+        // the deduced result type is 'void'.
+        if (!FD->getResultType()->getAs<AutoType>()) {
+          Diag(dcl->getLocation(), diag::err_auto_fn_no_return_but_not_auto)
+            << FD->getResultType();
+          FD->setInvalidDecl();
+        }
+        Context.adjustDeducedFunctionResultType(FD, Context.VoidTy);
+      }
+    }
+
     // If the function implicitly returns zero (like 'main') or is naked,
     // don't complain about missing return statements.
     if (FD->hasImplicitReturnZero() || FD->hasAttr<NakedAttr>())

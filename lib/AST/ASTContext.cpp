@@ -1837,6 +1837,17 @@ const FunctionType *ASTContext::adjustFunctionType(const FunctionType *T,
   return cast<FunctionType>(Result.getTypePtr());
 }
 
+void ASTContext::adjustDeducedFunctionResultType(FunctionDecl *FD,
+                                                 QualType ResultType) {
+  const FunctionProtoType *FPT = FD->getType()->castAs<FunctionProtoType>();
+  assert(FPT->getResultType()->getContainedAutoType() &&
+         "function does not have a deduced result type");
+  FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+  // FIXME: need to adjust all declarations?
+  FD->setType(getFunctionType(ResultType, FPT->arg_type_begin(),
+                              FPT->getNumArgs(), EPI));
+}
+
 /// getComplexType - Return the uniqued reference to the type for a complex
 /// number with the specified element type.
 QualType ASTContext::getComplexType(QualType T) const {

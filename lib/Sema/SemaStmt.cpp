@@ -2387,10 +2387,10 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
 
 bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD, Expr *&RetExpr,
                                             AutoType *AT) {
-  const FunctionProtoType *FPT = FD->getType()->castAs<FunctionProtoType>();
-
+  QualType OrigResultType = FD->getTypeSourceInfo()->getType()->
+    castAs<FunctionProtoType>()->getResultType();
   QualType Deduced;
-  DeduceAutoResult DAR = DeduceAutoType(FPT->getResultType(), RetExpr, Deduced);
+  DeduceAutoResult DAR = DeduceAutoType(OrigResultType, RetExpr, Deduced);
 
   if (DAR == DAR_Failed && !FD->isInvalidDecl()) {
     // FIXME: Use the original return type here, not the return type as adjusted
@@ -2398,10 +2398,10 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD, Expr *&RetExpr,
     if (isa<InitListExpr>(RetExpr))
       Diag(RetExpr->getExprLoc(),
            diag::err_auto_fn_deduction_failure_from_init_list)
-        << FD << FPT->getResultType();
+        << OrigResultType;
     else
       Diag(RetExpr->getExprLoc(), diag::err_auto_fn_deduction_failure)
-        << FD << FPT->getResultType() << RetExpr->getType();
+        << OrigResultType << RetExpr->getType();
   }
 
   if (DAR != DAR_Succeeded)
@@ -2413,9 +2413,7 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD, Expr *&RetExpr,
     return true;
   }
 
-  FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
-  FD->setType(Context.getFunctionType(Deduced, FPT->arg_type_begin(),
-                                      FPT->getNumArgs(), EPI));
+  Context.adjustDeducedFunctionResultType(FD, Deduced);
   return false;
 }
 

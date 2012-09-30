@@ -29,7 +29,7 @@ auto b(bool k) {
 }
 
 auto *ptr_1() {
-  return 100; // expected-error {{function 'ptr_1' with return type 'auto *' has incompatible return value of type 'int'}}
+  return 100; // expected-error {{cannot deduce return type 'auto *' from returned value of type 'int'}}
 }
 
 const auto &ref_1() {
@@ -55,7 +55,8 @@ auto init_list_2() {
 }
 
 auto init_list_3() {
-  return { 1, 2, 3.0 }; // expected-error {{cannot deduce return type for function 'init_list_3' with specified return type 'auto' from initializer list}}
+  // FIXME: Explain why we can't deduce std::initializer_list<...> here.
+  return { 1, 2, 3.0 }; // expected-error {{cannot deduce return type 'auto' from initializer list}}
 }
 
 auto fwd_decl(); // expected-note 2{{here}}
@@ -74,6 +75,13 @@ auto fac_2(int n) { // expected-note {{declared here}}
     return n * fac_2(n-1); // expected-error {{cannot be used before it is defined}}
   return n;
 }
+
+auto void_ret() {}
+using Void = void;
+using Void = decltype(void_ret());
+
+auto &void_ret_2() {} // expected-error {{cannot deduce return type 'auto &' for function with no return statements}}
+const auto void_ret_3() {} // ok, return type 'const void' is adjusted to 'void'
 
 #if 0
 auto fwd_decl_using();
