@@ -83,6 +83,14 @@ using Void = decltype(void_ret());
 auto &void_ret_2() {} // expected-error {{cannot deduce return type 'auto &' for function with no return statements}}
 const auto void_ret_3() {} // ok, return type 'const void' is adjusted to 'void'
 
+const auto void_ret_4() {
+  if (false)
+    return void();
+  if (false)
+    return;
+  return 0; // expected-error {{'auto' in return type deduced as 'int' here but deduced as 'void' in earlier return statement}}
+}
+
 #if 0
 auto fwd_decl_using();
 namespace N { using ::fwd_decl_using; }

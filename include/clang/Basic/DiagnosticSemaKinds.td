@@ -1375,11 +1375,14 @@ def err_auto_fn_deduction_failure : Error<
 def err_auto_fn_deduction_failure_from_init_list : Error<
   "cannot deduce return type %0 from initializer list">;
 def err_auto_fn_different_deductions : Error<
-  "'auto' deduced as %0 here but deduced as %1 in earlier return statement">;
+  "'auto' in return type deduced as %0 here but deduced as %1 in earlier "
+  "return statement">;
 def err_auto_fn_used_before_defined : Error<
   "function %0 with deduced return type cannot be used before it is defined">;
 def err_auto_fn_no_return_but_not_auto : Error<
   "cannot deduce return type %0 for function with no return statements">;
+def err_auto_fn_return_void_but_not_auto : Error<
+  "cannot deduce return type %0 from omitted return expression">;
 
 // C++11 override control
 def override_keyword_only_allowed_on_virtual_member_functions : Error<

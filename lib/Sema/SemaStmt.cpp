@@ -2385,32 +2385,47 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   return Owned(Result);
 }
 
-bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD, Expr *&RetExpr,
+bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
+                                            SourceLocation ReturnLoc,
+                                            Expr *&RetExpr,
                                             AutoType *AT) {
   QualType OrigResultType = FD->getTypeSourceInfo()->getType()->
     castAs<FunctionProtoType>()->getResultType();
   QualType Deduced;
-  DeduceAutoResult DAR = DeduceAutoType(OrigResultType, RetExpr, Deduced);
 
-  if (DAR == DAR_Failed && !FD->isInvalidDecl()) {
-    // FIXME: Use the original return type here, not the return type as adjusted
-    // by prior return statements.
-    if (isa<InitListExpr>(RetExpr))
-      Diag(RetExpr->getExprLoc(),
-           diag::err_auto_fn_deduction_failure_from_init_list)
+  if (RetExpr) {
+    DeduceAutoResult DAR = DeduceAutoType(OrigResultType, RetExpr, Deduced);
+
+    if (DAR == DAR_Failed && !FD->isInvalidDecl()) {
+      if (isa<InitListExpr>(RetExpr))
+        Diag(RetExpr->getExprLoc(),
+             diag::err_auto_fn_deduction_failure_from_init_list)
+          << OrigResultType;
+      else
+        Diag(RetExpr->getExprLoc(), diag::err_auto_fn_deduction_failure)
+          << OrigResultType << RetExpr->getType();
+    }
+
+    if (DAR != DAR_Succeeded)
+      return true;
+  } else {
+    if (!OrigResultType->getAs<AutoType>()) {
+      Diag(ReturnLoc, diag::err_auto_fn_return_void_but_not_auto)
         << OrigResultType;
-    else
-      Diag(RetExpr->getExprLoc(), diag::err_auto_fn_deduction_failure)
-        << OrigResultType << RetExpr->getType();
+      return true;
+    }
+    Deduced = SubstAutoType(OrigResultType, Context.VoidTy);
+    if (Deduced.isNull())
+      return true;
   }
 
-  if (DAR != DAR_Succeeded)
-    return true;
-
-  if (AT->isDeduced() && !Context.hasSameType(AT->getDeducedType(), Deduced)) {
-    Diag(RetExpr->getExprLoc(), diag::err_auto_fn_different_deductions)
-      << Deduced << AT->getDeducedType();
-    return true;
+  if (AT->isDeduced() && !FD->isInvalidDecl()) {
+    AutoType *NewAT = Deduced->getContainedAutoType();
+    if (!Context.hasSameType(AT->getDeducedType(), NewAT->getDeducedType())) {
+      Diag(ReturnLoc, diag::err_auto_fn_different_deductions)
+        << NewAT->getDeducedType() << AT->getDeducedType();
+      return true;
+    }
   }
 
   Context.adjustDeducedFunctionResultType(FD, Deduced);
@@ -2434,7 +2449,7 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   if (getLangOpts().CPlusPlus1y)
     if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CurContext))
       if (AutoType *AT = FD->getResultType()->getContainedAutoType())
-        if (DeduceFunctionTypeFromReturnExpr(FD, RetValExp, AT)) {
+        if (DeduceFunctionTypeFromReturnExpr(FD, ReturnLoc, RetValExp, AT)) {
           FD->setInvalidDecl();
           return StmtError();
         }

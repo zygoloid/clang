@@ -3692,6 +3692,10 @@ Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
   return DAR;
 }
 
+QualType Sema::SubstAutoType(QualType Type, QualType Deduced) {
+  return SubstituteAutoTransform(*this, Deduced).TransformType(Type);
+}
+
 void Sema::DiagnoseAutoDeductionFailure(VarDecl *VDecl, Expr *Init) {
   if (isa<InitListExpr>(Init))
     Diag(VDecl->getLocation(),
