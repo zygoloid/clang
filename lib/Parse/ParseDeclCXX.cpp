@@ -2987,6 +2987,26 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
       break;
     }
 
+    case AttributeList::AT_Deprecated: {
+      BalancedDelimiterTracker Parens(*this, tok::l_paren);
+      ExprResult Message;
+      if (!Parens.consumeOpen()) {
+        Message = ParseStringLiteralExpression();
+        Parens.consumeClose();
+      }
+      if (Message.isInvalid())
+        Message = ExprResult();
+
+      Expr *MessageExpr = Message.take();
+      attrs.addNew(AttrName,
+                   SourceRange(ScopeLoc.isValid() ? ScopeLoc : AttrLoc,
+                               AttrLoc),
+                   ScopeName, ScopeLoc, 0, SourceLocation(),
+                   &MessageExpr, MessageExpr ? 1 : 0, AttributeList::AS_CXX11);
+      AttrParsed = true;
+      break;
+    }
+
     // Silence warnings
     default: break;
     }
