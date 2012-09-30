@@ -100,6 +100,12 @@ namespace Templates {
   const int &b = f2(0);
   double d;
   float &c = f2(0.0); // expected-error {{non-const lvalue reference to type 'float' cannot bind to a value of unrelated type 'double'}}
+
+  template<typename T> auto fwd_decl(); // expected-note {{declared here}}
+  int e = fwd_decl<int>(); // expected-error {{cannot be used before it is defined}}
+  template<typename T> auto fwd_decl() { return 0; }
+  int f = fwd_decl<int>();
+  int g = fwd_decl<char>();
 }
 
 #if 0
