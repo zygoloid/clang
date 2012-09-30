@@ -387,9 +387,7 @@ void CompilerInstance::createCodeCompletionConsumer() {
     setCodeCompletionConsumer(
       createCodeCompletionConsumer(getPreprocessor(),
                                    Loc.FileName, Loc.Line, Loc.Column,
-                                   getFrontendOpts().ShowMacrosInCodeCompletion,
-                             getFrontendOpts().ShowCodePatternsInCodeCompletion,
-                           getFrontendOpts().ShowGlobalSymbolsInCodeCompletion,
+                                   getFrontendOpts().CodeCompleteOpts,
                                    llvm::outs()));
     if (!CompletionConsumer)
       return;
@@ -415,16 +413,13 @@ CompilerInstance::createCodeCompletionConsumer(Preprocessor &PP,
                                                const std::string &Filename,
                                                unsigned Line,
                                                unsigned Column,
-                                               bool ShowMacros,
-                                               bool ShowCodePatterns,
-                                               bool ShowGlobals,
+                                               const CodeCompleteOptions &Opts,
                                                raw_ostream &OS) {
   if (EnableCodeCompletion(PP, Filename, Line, Column))
     return 0;
 
   // Set up the creation routine for code-completion.
-  return new PrintingCodeCompleteConsumer(ShowMacros, ShowCodePatterns,
-                                          ShowGlobals, OS);
+  return new PrintingCodeCompleteConsumer(Opts, OS);
 }
 
 void CompilerInstance::createSema(TranslationUnitKind TUKind,
@@ -456,7 +451,7 @@ void CompilerInstance::clearOutputFiles(bool EraseFiles) {
         FileMgr->FixupRelativePath(NewOutFile);
         if (llvm::error_code ec = llvm::sys::fs::rename(it->TempFilename,
                                                         NewOutFile.str())) {
-          getDiagnostics().Report(diag::err_fe_unable_to_rename_temp)
+          getDiagnostics().Report(diag::err_unable_to_rename_temp)
             << it->TempFilename << it->Filename << ec.message();
 
           bool existed;
@@ -560,7 +555,8 @@ CompilerInstance::createOutputFile(StringRef OutputPath,
       TempPath += "-%%%%%%%%";
       int fd;
       if (llvm::sys::fs::unique_file(TempPath.str(), fd, TempPath,
-                               /*makeAbsolute=*/false) == llvm::errc::success) {
+                                     /*makeAbsolute=*/false, 0664)
+          == llvm::errc::success) {
         OS.reset(new llvm::raw_fd_ostream(fd, /*shouldClose=*/true));
         OSFile = TempFile = TempPath.str();
       }
@@ -984,6 +980,9 @@ Module *CompilerInstance::loadModule(SourceLocation ImportLoc,
       Module = PP->getHeaderSearchInfo().getModuleMap()
                  .findModule((Path[0].first->getName()));
     }
+
+    if (Module)
+      Module->setASTFile(ModuleFile);
     
     // Cache the result of this top-level module lookup for later.
     Known = KnownModules.insert(std::make_pair(Path[0].first, Module)).first;

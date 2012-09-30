@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
@@ -28,13 +29,15 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/ErrorHandling.h"
 
+#include "BodyFarm.h"
+
 using namespace clang;
 
 typedef llvm::DenseMap<const void *, ManagedAnalysis *> ManagedAnalysisMap;
 
 AnalysisDeclContext::AnalysisDeclContext(AnalysisDeclContextManager *Mgr,
-                                 const Decl *d,
-                                 const CFG::BuildOptions &buildOptions)
+                                         const Decl *d,
+                                         const CFG::BuildOptions &buildOptions)
   : Manager(Mgr),
     D(d),
     cfgBuildOptions(buildOptions),
@@ -48,7 +51,7 @@ AnalysisDeclContext::AnalysisDeclContext(AnalysisDeclContextManager *Mgr,
 }
 
 AnalysisDeclContext::AnalysisDeclContext(AnalysisDeclContextManager *Mgr,
-                                 const Decl *d)
+                                         const Decl *d)
 : Manager(Mgr),
   D(d),
   forcedBlkExprs(0),
@@ -61,11 +64,16 @@ AnalysisDeclContext::AnalysisDeclContext(AnalysisDeclContextManager *Mgr,
 }
 
 AnalysisDeclContextManager::AnalysisDeclContextManager(bool useUnoptimizedCFG,
-                                               bool addImplicitDtors,
-                                               bool addInitializers) {
+                                                       bool addImplicitDtors,
+                                                       bool addInitializers,
+                                                       bool addTemporaryDtors,
+                                                       bool synthesizeBodies)
+  : SynthesizeBodies(synthesizeBodies)
+{
   cfgBuildOptions.PruneTriviallyFalseEdges = !useUnoptimizedCFG;
   cfgBuildOptions.AddImplicitDtors = addImplicitDtors;
   cfgBuildOptions.AddInitializers = addInitializers;
+  cfgBuildOptions.AddTemporaryDtors = addTemporaryDtors;
 }
 
 void AnalysisDeclContextManager::clear() {
@@ -74,9 +82,18 @@ void AnalysisDeclContextManager::clear() {
   Contexts.clear();
 }
 
+static BodyFarm &getBodyFarm(ASTContext &C) {
+  static BodyFarm *BF = new BodyFarm(C);
+  return *BF;
+}
+
 Stmt *AnalysisDeclContext::getBody() const {
-  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D))
-    return FD->getBody();
+  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    Stmt *Body = FD->getBody();
+    if (!Body && Manager && Manager->synthesizeBodies())
+      return getBodyFarm(getASTContext()).getBody(FD);
+    return Body;
+  }
   else if (const ObjCMethodDecl *MD = dyn_cast<ObjCMethodDecl>(D))
     return MD->getBody();
   else if (const BlockDecl *BD = dyn_cast<BlockDecl>(D))
@@ -180,8 +197,16 @@ void AnalysisDeclContext::dumpCFG(bool ShowColors) {
 }
 
 ParentMap &AnalysisDeclContext::getParentMap() {
-  if (!PM)
+  if (!PM) {
     PM.reset(new ParentMap(getBody()));
+    if (const CXXConstructorDecl *C = dyn_cast<CXXConstructorDecl>(getDecl())) {
+      for (CXXConstructorDecl::init_const_iterator I = C->init_begin(),
+                                                   E = C->init_end();
+           I != E; ++I) {
+        PM->addStmt((*I)->getInit());
+      }
+    }
+  }
   return *PM;
 }
 
@@ -192,6 +217,13 @@ PseudoConstantAnalysis *AnalysisDeclContext::getPseudoConstantAnalysis() {
 }
 
 AnalysisDeclContext *AnalysisDeclContextManager::getContext(const Decl *D) {
+  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    // Calling 'hasBody' replaces 'FD' in place with the FunctionDecl
+    // that has the body.
+    FD->hasBody(FD);
+    D = FD;
+  }
+
   AnalysisDeclContext *&AC = Contexts[D];
   if (!AC)
     AC = new AnalysisDeclContext(this, D, cfgBuildOptions);
@@ -202,6 +234,14 @@ const StackFrameContext *
 AnalysisDeclContext::getStackFrame(LocationContext const *Parent, const Stmt *S,
                                const CFGBlock *Blk, unsigned Idx) {
   return getLocationContextManager().getStackFrame(this, Parent, S, Blk, Idx);
+}
+
+const BlockInvocationContext *
+AnalysisDeclContext::getBlockInvocationContext(const LocationContext *parent,
+                                               const clang::BlockDecl *BD,
+                                               const void *ContextData) {
+  return getLocationContextManager().getBlockInvocationContext(this, parent,
+                                                               BD, ContextData);
 }
 
 LocationContextManager & AnalysisDeclContext::getLocationContextManager() {
@@ -234,7 +274,7 @@ void ScopeContext::Profile(llvm::FoldingSetNodeID &ID) {
 }
 
 void BlockInvocationContext::Profile(llvm::FoldingSetNodeID &ID) {
-  Profile(ID, getAnalysisDeclContext(), getParent(), BD);
+  Profile(ID, getAnalysisDeclContext(), getParent(), BD, ContextData);
 }
 
 //===----------------------------------------------------------------------===//
@@ -283,6 +323,24 @@ LocationContextManager::getScope(AnalysisDeclContext *ctx,
   return getLocationContext<ScopeContext, Stmt>(ctx, parent, s);
 }
 
+const BlockInvocationContext *
+LocationContextManager::getBlockInvocationContext(AnalysisDeclContext *ctx,
+                                                  const LocationContext *parent,
+                                                  const BlockDecl *BD,
+                                                  const void *ContextData) {
+  llvm::FoldingSetNodeID ID;
+  BlockInvocationContext::Profile(ID, ctx, parent, BD, ContextData);
+  void *InsertPos;
+  BlockInvocationContext *L =
+    cast_or_null<BlockInvocationContext>(Contexts.FindNodeOrInsertPos(ID,
+                                                                    InsertPos));
+  if (!L) {
+    L = new BlockInvocationContext(ctx, parent, BD, ContextData);
+    Contexts.InsertNode(L, InsertPos);
+  }
+  return L;
+}
+
 //===----------------------------------------------------------------------===//
 // LocationContext methods.
 //===----------------------------------------------------------------------===//
@@ -292,19 +350,6 @@ const StackFrameContext *LocationContext::getCurrentStackFrame() const {
   while (LC) {
     if (const StackFrameContext *SFC = dyn_cast<StackFrameContext>(LC))
       return SFC;
-    LC = LC->getParent();
-  }
-  return NULL;
-}
-
-const StackFrameContext *
-LocationContext::getStackFrameForDeclContext(const DeclContext *DC) const {
-  const LocationContext *LC = this;
-  while (LC) {
-    if (const StackFrameContext *SFC = dyn_cast<StackFrameContext>(LC)) {
-      if (cast<DeclContext>(SFC->getDecl()) == DC)
-        return SFC;
-    }
     LC = LC->getParent();
   }
   return NULL;

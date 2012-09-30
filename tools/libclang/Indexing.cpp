@@ -68,10 +68,11 @@ public:
                                   const Token &IncludeTok,
                                   StringRef FileName,
                                   bool IsAngled,
+                                  CharSourceRange FilenameRange,
                                   const FileEntry *File,
-                                  SourceLocation EndLoc,
                                   StringRef SearchPath,
-                                  StringRef RelativePath) {
+                                  StringRef RelativePath,
+                                  const Module *Imported) {
     bool isImport = (IncludeTok.is(tok::identifier) &&
             IncludeTok.getIdentifierInfo()->getPPKeywordID() == tok::pp_import);
     IndexCtx.ppIncludedFile(HashLoc, FileName, File, isImport, IsAngled);
@@ -353,7 +354,8 @@ static void clang_indexSourceFile_Impl(void *UserData) {
     CInvok->getDiagnosticOpts().IgnoreWarnings = true;
 
   ASTUnit *Unit = ASTUnit::create(CInvok.getPtr(), Diags,
-                                  /*CaptureDiagnostics=*/true);
+                                  /*CaptureDiagnostics=*/true,
+                                  /*UserFilesAreVolatile=*/true);
   OwningPtr<CXTUOwner> CXTU(new CXTUOwner(MakeCXTranslationUnit(CXXIdx, Unit)));
 
   // Recover resources if we crash before exiting this method.
@@ -369,7 +371,6 @@ static void clang_indexSourceFile_Impl(void *UserData) {
     IndexActionCleanup(IndexAction.get());
 
   bool Persistent = requestedToGetTU;
-  StringRef ResourceFilesPath = CXXIdx->getClangResourcesPath();
   bool OnlyLocalDecls = false;
   bool PrecompilePreamble = false;
   bool CacheCodeCompletionResults = false;
@@ -393,11 +394,13 @@ static void clang_indexSourceFile_Impl(void *UserData) {
                                                        IndexAction.get(),
                                                        Unit,
                                                        Persistent,
-                                                       ResourceFilesPath,
+                                                CXXIdx->getClangResourcesPath(),
                                                        OnlyLocalDecls,
                                                     /*CaptureDiagnostics=*/true,
                                                        PrecompilePreamble,
-                                                    CacheCodeCompletionResults);
+                                                    CacheCodeCompletionResults,
+                                 /*IncludeBriefCommentsInCodeCompletion=*/false,
+                                                 /*UserFilesAreVolatile=*/true);
   if (DiagTrap.hasErrorOccurred() && CXXIdx->getDisplayDiagnostics())
     printDiagsToStderr(Unit);
 
@@ -536,6 +539,8 @@ static void clang_indexTranslationUnit_Impl(void *UserData) {
   ASTUnit *Unit = static_cast<ASTUnit *>(TU->TUData);
   if (!Unit)
     return;
+
+  ASTUnit::ConcurrencyCheck Check(*Unit);
 
   FileManager &FileMgr = Unit->getFileManager();
 

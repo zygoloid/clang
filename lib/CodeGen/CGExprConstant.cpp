@@ -386,20 +386,20 @@ bool ConstStructBuilder::Build(InitListExpr *ILE) {
     if (IsMsStruct) {
       // Zero-length bitfields following non-bitfield members are
       // ignored:
-      if (CGM.getContext().ZeroBitfieldFollowsNonBitfield(&*Field, LastFD)) {
+      if (CGM.getContext().ZeroBitfieldFollowsNonBitfield(*Field, LastFD)) {
         --FieldNo;
         continue;
       }
-      LastFD = &*Field;
+      LastFD = *Field;
     }
     
     // If this is a union, skip all the fields that aren't being initialized.
-    if (RD->isUnion() && ILE->getInitializedFieldInUnion() != &*Field)
+    if (RD->isUnion() && ILE->getInitializedFieldInUnion() != *Field)
       continue;
 
     // Don't emit anonymous bitfields, they just affect layout.
     if (Field->isUnnamedBitfield()) {
-      LastFD = &*Field;
+      LastFD = *Field;
       continue;
     }
 
@@ -417,10 +417,10 @@ bool ConstStructBuilder::Build(InitListExpr *ILE) {
     
     if (!Field->isBitField()) {
       // Handle non-bitfield members.
-      AppendField(&*Field, Layout.getFieldOffset(FieldNo), EltInit);
+      AppendField(*Field, Layout.getFieldOffset(FieldNo), EltInit);
     } else {
       // Otherwise we have a bitfield.
-      AppendBitField(&*Field, Layout.getFieldOffset(FieldNo),
+      AppendBitField(*Field, Layout.getFieldOffset(FieldNo),
                      cast<llvm::ConstantInt>(EltInit));
     }
   }
@@ -486,20 +486,20 @@ void ConstStructBuilder::Build(const APValue &Val, const RecordDecl *RD,
     if (IsMsStruct) {
       // Zero-length bitfields following non-bitfield members are
       // ignored:
-      if (CGM.getContext().ZeroBitfieldFollowsNonBitfield(&*Field, LastFD)) {
+      if (CGM.getContext().ZeroBitfieldFollowsNonBitfield(*Field, LastFD)) {
         --FieldNo;
         continue;
       }
-      LastFD = &*Field;
+      LastFD = *Field;
     }
 
     // If this is a union, skip all the fields that aren't being initialized.
-    if (RD->isUnion() && Val.getUnionField() != &*Field)
+    if (RD->isUnion() && Val.getUnionField() != *Field)
       continue;
 
     // Don't emit anonymous bitfields, they just affect layout.
     if (Field->isUnnamedBitfield()) {
-      LastFD = &*Field;
+      LastFD = *Field;
       continue;
     }
 
@@ -512,10 +512,10 @@ void ConstStructBuilder::Build(const APValue &Val, const RecordDecl *RD,
 
     if (!Field->isBitField()) {
       // Handle non-bitfield members.
-      AppendField(&*Field, Layout.getFieldOffset(FieldNo) + OffsetBits, EltInit);
+      AppendField(*Field, Layout.getFieldOffset(FieldNo) + OffsetBits, EltInit);
     } else {
       // Otherwise we have a bitfield.
-      AppendBitField(&*Field, Layout.getFieldOffset(FieldNo) + OffsetBits,
+      AppendBitField(*Field, Layout.getFieldOffset(FieldNo) + OffsetBits,
                      cast<llvm::ConstantInt>(EltInit));
     }
   }
@@ -691,6 +691,9 @@ public:
 
     case CK_Dependent: llvm_unreachable("saw dependent cast!");
 
+    case CK_BuiltinFnToFnPtr:
+      llvm_unreachable("builtin functions are handled elsewhere");
+
     case CK_ReinterpretMemberPointer:
     case CK_DerivedToBaseMemberPointer:
     case CK_BaseToDerivedMemberPointer:
@@ -811,11 +814,7 @@ public:
     return llvm::ConstantArray::get(AType, Elts);
   }
 
-  llvm::Constant *EmitStructInitialization(InitListExpr *ILE) {
-    return ConstStructBuilder::BuildStruct(CGM, CGF, ILE);
-  }
-
-  llvm::Constant *EmitUnionInitialization(InitListExpr *ILE) {
+  llvm::Constant *EmitRecordInitialization(InitListExpr *ILE) {
     return ConstStructBuilder::BuildStruct(CGM, CGF, ILE);
   }
 
@@ -828,10 +827,7 @@ public:
       return EmitArrayInitialization(ILE);
 
     if (ILE->getType()->isRecordType())
-      return EmitStructInitialization(ILE);
-
-    if (ILE->getType()->isUnionType())
-      return EmitUnionInitialization(ILE);
+      return EmitRecordInitialization(ILE);
 
     return 0;
   }
@@ -932,7 +928,8 @@ public:
         C = new llvm::GlobalVariable(CGM.getModule(), C->getType(),
                                      E->getType().isConstant(CGM.getContext()),
                                      llvm::GlobalValue::InternalLinkage,
-                                     C, ".compoundliteral", 0, false,
+                                     C, ".compoundliteral", 0,
+                                     llvm::GlobalVariable::NotThreadLocal,
                           CGM.getContext().getTargetAddressSpace(E->getType()));
       return C;
     }
@@ -1300,7 +1297,8 @@ FillInNullDataMemberPointers(CodeGenModule &CGM, QualType T,
       if (CGM.getTypes().isZeroInitializable(BaseDecl))
         continue;
 
-      uint64_t BaseOffset = Layout.getBaseClassOffsetInBits(BaseDecl);
+      uint64_t BaseOffset =
+        CGM.getContext().toBits(Layout.getBaseClassOffset(BaseDecl));
       FillInNullDataMemberPointers(CGM, I->getType(),
                                    Elements, StartOffset + BaseOffset);
     }
@@ -1374,7 +1372,7 @@ static llvm::Constant *EmitNullConstant(CodeGenModule &CGM,
   // Fill in all the fields.
   for (RecordDecl::field_iterator I = record->field_begin(),
          E = record->field_end(); I != E; ++I) {
-    const FieldDecl *field = &*I;
+    const FieldDecl *field = *I;
 
     // Fill in non-bitfields. (Bitfields always use a zero pattern, which we
     // will fill in later.)

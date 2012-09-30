@@ -151,23 +151,44 @@ void missing_template_keyword(){
 
 class AAAA { };
 
+template <typename T>
+class SimpleTemplate {};
+
 template <class T>
 void redundant_typename() {
    typename T t;// expected-warning {{expected a qualified name after 'typename'}}
    typename AAAA a;// expected-warning {{expected a qualified name after 'typename'}}
+
    t = 3;
+   
+   typedef typename T* pointerT;// expected-warning {{expected a qualified name after 'typename'}}
+   typedef typename SimpleTemplate<int> templateT;// expected-warning {{expected a qualified name after 'typename'}}
+
+   pointerT pT = &t;
+   *pT = 4;
+
+   int var;
+   int k = typename var;// expected-error {{expected a qualified name after 'typename'}}
 }
 
 
 __interface MicrosoftInterface;
 __interface MicrosoftInterface {
-   virtual void foo1() = 0;
+   void foo1() = 0;
    virtual void foo2() = 0;
+};
+
+__interface MicrosoftDerivedInterface : public MicrosoftInterface {
+  void foo1();
+  void foo2() override;
+  void foo3();
 };
 
 void interface_test() {
   MicrosoftInterface* a;
   a->foo1();
+  MicrosoftDerivedInterface* b;
+  b->foo2();
 }
 
 __int64 x7 = __int64(0);
@@ -284,28 +305,29 @@ int main () {
   missing_template_keyword<int>();
 }
 
-
-
-
 namespace access_protected_PTM {
+  class A {
+  protected:
+    void f(); // expected-note {{must name member using the type of the current context 'access_protected_PTM::B'}}
+  };
 
-class A {
-protected:
-  void f(); // expected-note {{must name member using the type of the current context 'access_protected_PTM::B'}}
-};
+  class B : public A{
+  public:
+    void test_access();
+    static void test_access_static();
+  };
 
-class B : public A{
-public:
-  void test_access();
-  static void test_access_static();
-};
+  void B::test_access() {
+    &A::f; // expected-error {{'f' is a protected member of 'access_protected_PTM::A'}}
+  }
 
-void B::test_access() {
-  &A::f; // expected-error {{'f' is a protected member of 'access_protected_PTM::A'}}
+  void B::test_access_static() {
+    &A::f;
+  }
 }
 
-void B::test_access_static() {
-  &A::f;
-}
-
+namespace Inheritance {
+  class __single_inheritance A;
+  class __multiple_inheritance B;
+  class __virtual_inheritance C;
 }

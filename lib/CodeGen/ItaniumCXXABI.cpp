@@ -20,13 +20,14 @@
 
 #include "CGCXXABI.h"
 #include "CGRecordLayout.h"
+#include "CGVTables.h"
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
-#include <clang/AST/Mangle.h>
-#include <clang/AST/Type.h>
-#include <llvm/Intrinsics.h>
-#include <llvm/Target/TargetData.h>
-#include <llvm/Value.h>
+#include "clang/AST/Mangle.h"
+#include "clang/AST/Type.h"
+#include "llvm/Intrinsics.h"
+#include "llvm/Target/TargetData.h"
+#include "llvm/Value.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -91,6 +92,10 @@ public:
                                           llvm::Value *Addr,
                                           const MemberPointerType *MPT);
 
+  llvm::Value *adjustToCompleteObject(CodeGenFunction &CGF,
+                                      llvm::Value *ptr,
+                                      QualType type);
+
   void BuildConstructorSignature(const CXXConstructorDecl *Ctor,
                                  CXXCtorType T,
                                  CanQualType &ResTy,
@@ -107,6 +112,8 @@ public:
 
   void EmitInstanceFunctionProlog(CodeGenFunction &CGF);
 
+  StringRef GetPureVirtualCallName() { return "__cxa_pure_virtual"; }
+
   CharUnits getArrayCookieSizeImpl(QualType elementType);
   llvm::Value *InitializeArrayCookie(CodeGenFunction &CGF,
                                      llvm::Value *NewPtr,
@@ -121,6 +128,8 @@ public:
                        llvm::GlobalVariable *DeclPtr, bool PerformInit);
   void registerGlobalDtor(CodeGenFunction &CGF, llvm::Constant *dtor,
                           llvm::Constant *addr);
+
+  void EmitVTables(const CXXRecordDecl *Class);
 };
 
 class ARMCXXABI : public ItaniumCXXABI {
@@ -672,6 +681,25 @@ bool ItaniumCXXABI::isZeroInitializable(const MemberPointerType *MPT) {
   return MPT->getPointeeType()->isFunctionType();
 }
 
+/// The Itanium ABI always places an offset to the complete object
+/// at entry -2 in the vtable.
+llvm::Value *ItaniumCXXABI::adjustToCompleteObject(CodeGenFunction &CGF,
+                                                   llvm::Value *ptr,
+                                                   QualType type) {
+  // Grab the vtable pointer as an intptr_t*.
+  llvm::Value *vtable = CGF.GetVTablePtr(ptr, CGF.IntPtrTy->getPointerTo());
+
+  // Track back to entry -2 and pull out the offset there.
+  llvm::Value *offsetPtr = 
+    CGF.Builder.CreateConstInBoundsGEP1_64(vtable, -2, "complete-offset.ptr");
+  llvm::LoadInst *offset = CGF.Builder.CreateLoad(offsetPtr);
+  offset->setAlignment(CGF.PointerAlignInBytes);
+
+  // Apply the offset.
+  ptr = CGF.Builder.CreateBitCast(ptr, CGF.Int8PtrTy);
+  return CGF.Builder.CreateInBoundsGEP(ptr, offset);
+}
+
 /// The generic ABI passes 'this', plus a VTT if it's initializing a
 /// base subobject.
 void ItaniumCXXABI::BuildConstructorSignature(const CXXConstructorDecl *Ctor,
@@ -1150,4 +1178,9 @@ void ItaniumCXXABI::registerGlobalDtor(CodeGenFunction &CGF,
   }
 
   CGF.registerGlobalDtorWithAtExit(dtor, addr);
+}
+
+/// Generate and emit virtual tables for the given class.
+void ItaniumCXXABI::EmitVTables(const CXXRecordDecl *Class) {
+  CGM.getVTables().GenerateClassData(CGM.getVTableLinkage(Class), Class);
 }

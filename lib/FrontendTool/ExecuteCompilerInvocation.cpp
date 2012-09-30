@@ -23,7 +23,7 @@
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
-#include "clang/Rewrite/FrontendActions.h"
+#include "clang/Rewrite/Frontend/FrontendActions.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/DynamicLibrary.h"
 using namespace clang;
@@ -32,6 +32,7 @@ static FrontendAction *CreateFrontendBaseAction(CompilerInstance &CI) {
   using namespace clang::frontend;
 
   switch (CI.getFrontendOpts().ProgramAction) {
+  case ASTDeclList:            return new ASTDeclListAction();
   case ASTDump:                return new ASTDumpAction();
   case ASTDumpXML:             return new ASTDumpXMLAction();
   case ASTPrint:               return new ASTPrintAction();
@@ -71,7 +72,12 @@ static FrontendAction *CreateFrontendBaseAction(CompilerInstance &CI) {
 
   case PrintDeclContext:       return new DeclContextPrintAction();
   case PrintPreamble:          return new PrintPreambleAction();
-  case PrintPreprocessedInput: return new PrintPreprocessedAction();
+  case PrintPreprocessedInput: {
+    if (CI.getPreprocessorOutputOpts().RewriteIncludes)
+      return new RewriteIncludesAction();
+    return new PrintPreprocessedAction();
+  }
+
   case RewriteMacros:          return new RewriteMacrosAction();
   case RewriteObjC:            return new RewriteObjCAction();
   case RewriteTest:            return new RewriteTestAction();
@@ -169,7 +175,7 @@ bool clang::ExecuteCompilerInvocation(CompilerInstance *Clang) {
 
   // Honor -analyzer-checker-help.
   // This should happen AFTER plugins have been loaded!
-  if (Clang->getAnalyzerOpts().ShowCheckerHelp) {
+  if (Clang->getAnalyzerOpts()->ShowCheckerHelp) {
     ento::printCheckerHelp(llvm::outs(), Clang->getFrontendOpts().Plugins);
     return 0;
   }

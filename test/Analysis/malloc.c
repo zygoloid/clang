@@ -1,5 +1,7 @@
-// RUN: %clang_cc1 -analyze -analyzer-checker=core,experimental.deadcode.UnreachableCode,experimental.core.CastSize,unix.Malloc -analyzer-store=region -verify %s
-#include "system-header-simulator.h"
+// RUN: %clang_cc1 -analyze -analyzer-checker=core,alpha.deadcode.UnreachableCode,alpha.core.CastSize,unix.Malloc,debug.ExprInspection -analyzer-store=region -verify %s
+#include "Inputs/system-header-simulator.h"
+
+void clang_analyzer_eval(int);
 
 typedef __typeof(sizeof(int)) size_t;
 void *malloc(size_t);
@@ -8,6 +10,8 @@ void free(void *);
 void *realloc(void *ptr, size_t size);
 void *reallocf(void *ptr, size_t size);
 void *calloc(size_t nmemb, size_t size);
+char *strdup(const char *s);
+char *strndup(const char *s, size_t n);
 
 void myfoo(int *p);
 void myfooint(int p);
@@ -15,7 +19,7 @@ char *fooRetPtr();
 
 void f1() {
   int *p = malloc(12);
-  return; // expected-warning{{Memory is never released; potential leak}}
+  return; // expected-warning{{Memory is never released; potential leak of memory pointed to by 'p'}}
 }
 
 void f2() {
@@ -40,7 +44,7 @@ void reallocNotNullPtr(unsigned sizeIn) {
   char *p = (char*)malloc(size);
   if (p) {
     char *q = (char*)realloc(p, sizeIn);
-    char x = *q; // expected-warning {{Memory is never released; potential leak}}
+    char x = *q; // expected-warning {{Memory is never released; potential leak of memory pointed to by 'q'}}
   }
 }
 
@@ -65,7 +69,7 @@ void reallocSizeZero1() {
   char *p = malloc(12);
   char *r = realloc(p, 0);
   if (!r) {
-    free(p);
+    free(p); // expected-warning {{Attempt to free released memory}}
   } else {
     free(r);
   }
@@ -75,7 +79,7 @@ void reallocSizeZero2() {
   char *p = malloc(12);
   char *r = realloc(p, 0);
   if (!r) {
-    free(p);
+    free(p); // expected-warning {{Attempt to free released memory}}
   } else {
     free(r);
   }
@@ -98,7 +102,7 @@ void reallocSizeZero5() {
 }
 
 void reallocPtrZero1() {
-  char *r = realloc(0, 12); // expected-warning {{Memory is never released; potential leak}}
+  char *r = realloc(0, 12); // expected-warning {{Memory is never released; potential leak of memory pointed to by 'r'}}
 }
 
 void reallocPtrZero2() {
@@ -243,6 +247,12 @@ void f7() {
   x[0] = 'a'; // expected-warning{{Use of memory after it is freed}}
 }
 
+void f8() {
+  char *x = (char*) malloc(4);
+  free(x);
+  char *y = strndup(x, 4); // expected-warning{{Use of memory after it is freed}}
+}
+
 void f7_realloc() {
   char *x = (char*) malloc(4);
   realloc(x,0);
@@ -250,11 +260,11 @@ void f7_realloc() {
 }
 
 void PR6123() {
-  int *x = malloc(11); // expected-warning{{Cast a region whose size is not a multiple of the destination type size.}}
+  int *x = malloc(11); // expected-warning{{Cast a region whose size is not a multiple of the destination type size}}
 }
 
 void PR7217() {
-  int *buf = malloc(2); // expected-warning{{Cast a region whose size is not a multiple of the destination type size.}}
+  int *buf = malloc(2); // expected-warning{{Cast a region whose size is not a multiple of the destination type size}}
   buf[1] = 'c'; // not crash
 }
 
@@ -311,7 +321,7 @@ void nullFree() {
 void paramFree(int *p) {
   myfoo(p);
   free(p); // no warning
-  myfoo(p); // TODO: This should be a warning.
+  myfoo(p); // expected-warning {{Use of memory after it is freed}}
 }
 
 int* mallocEscapeRet() {
@@ -379,7 +389,7 @@ void mallocEscapeMalloc() {
 
 void mallocMalloc() {
   int *p = malloc(12);
-  p = malloc(12); // expected-warning 2 {{Memory is never released; potential leak}}
+  p = malloc(12); // expected-warning {{Memory is never released; potential leak}}
 }
 
 void mallocFreeMalloc() {
@@ -503,20 +513,26 @@ void testMalloc() {
   int *x = malloc(12);
   StructWithPtr St;
   St.memP = x;
-  arrOfStructs[0] = St;
+  arrOfStructs[0] = St; // no-warning
 }
 
 StructWithPtr testMalloc2() {
   int *x = malloc(12);
   StructWithPtr St;
   St.memP = x;
-  return St;
+  return St; // no-warning
 }
 
 int *testMalloc3() {
   int *x = malloc(12);
   int *y = x;
-  return y;
+  return y; // no-warning
+}
+
+void testStructLeak() {
+  StructWithPtr St;
+  St.memP = malloc(12);
+  return; // expected-warning {{Memory is never released; potential leak of memory pointed to by 'St.memP'}}
 }
 
 void testElemRegion1() {
@@ -653,10 +669,6 @@ int *specialMallocWithStruct() {
 }
 
 // Test various allocation/deallocation functions.
-
-char *strdup(const char *s);
-char *strndup(const char *s, size_t n);
-
 void testStrdup(const char *s, unsigned validIndex) {
   char *s2 = strdup(s);
   s2[validIndex + 1] = 'b';// expected-warning {{Memory is never released; potential leak}}
@@ -709,6 +721,18 @@ FILE *useFunOpenNoReleaseFunction() {
         free(ctx);
     }
     return f; // expected-warning{{leak}}
+}
+
+static int readNothing(void *_ctx, char *buf, int size) {
+  return 0;
+}
+FILE *useFunOpenReadNoRelease() {
+  void *ctx = malloc(sizeof(int));
+  FILE *f = funopen(ctx, readNothing, 0, 0, 0);
+  if (f == 0) {
+    free(ctx);
+  }
+  return f; // expected-warning{{leak}}
 }
 
 // Test setbuf, setvbuf.
@@ -835,10 +859,8 @@ int fPtr(unsigned cond, int x) {
   return (cond ? mySub : myAdd)(x, x);
 }
 
-// ----------------------------------------------------------------------------
-// Below are the known false positives.
+// Test anti-aliasing.
 
-// TODO: There should be no warning here. This one might be difficult to get rid of.
 void dependsOnValueOfPtr(int *g, unsigned f) {
   int *p;
 
@@ -851,35 +873,75 @@ void dependsOnValueOfPtr(int *g, unsigned f) {
   if (p != g)
     free(p);
   else
-    return; // expected-warning{{Memory is never released; potential leak}}
+    return; // no warning
   return;
 }
 
-// ----------------------------------------------------------------------------
-// False negatives.
-
-// TODO: This requires tracking symbols stored inside the structs/arrays.
-void testMalloc5() {
-  StructWithPtr St;
-  StructWithPtr *pSt = &St;
-  pSt->memP = malloc(12);
+int CMPRegionHeapToStack() {
+  int x = 0;
+  int *x1 = malloc(8);
+  int *x2 = &x;
+  clang_analyzer_eval(x1 == x2); // expected-warning{{FALSE}}
+  free(x1);
+  return x;
 }
 
-// TODO: This is another false negative.
-void testMallocWithParam(int **p) {
-  *p = (int*) malloc(sizeof(int));
-  *p = 0;
+int CMPRegionHeapToHeap2() {
+  int x = 0;
+  int *x1 = malloc(8);
+  int *x2 = malloc(8);
+  int *x4 = x1;
+  int *x5 = x2;
+  clang_analyzer_eval(x4 == x5); // expected-warning{{FALSE}}
+  free(x1);
+  free(x2);
+  return x;
 }
 
-void testMallocWithParam_2(int **p) {
-  *p = (int*) malloc(sizeof(int));
+int CMPRegionHeapToHeap() {
+  int x = 0;
+  int *x1 = malloc(8);
+  int *x4 = x1;
+  if (x1 == x4) {
+    free(x1);
+    return 5/x; // expected-warning{{Division by zero}}
+  }
+  return x;// expected-warning{{This statement is never executed}}
 }
 
-// TODO: This should produce a warning, similar to the previous issue.
+int HeapAssignment() {
+  int m = 0;
+  int *x = malloc(4);
+  int *y = x;
+  *x = 5;
+  clang_analyzer_eval(*x != *y); // expected-warning{{FALSE}}
+  free(x);
+  return 0;
+}
+
+int *retPtr();
+int *retPtrMightAlias(int *x);
+int cmpHeapAllocationToUnknown() {
+  int zero = 0;
+  int *yBefore = retPtr();
+  int *m = malloc(8);
+  int *yAfter = retPtrMightAlias(m);
+  clang_analyzer_eval(yBefore == m); // expected-warning{{FALSE}}
+  clang_analyzer_eval(yAfter == m); // expected-warning{{FALSE}}
+  free(m);
+  return 0;
+}
+
 void localArrayTest() {
   char *p = (char*)malloc(12);
   char *ArrayL[12];
-  ArrayL[0] = p;
+  ArrayL[0] = p; // expected-warning {{leak}}
+}
+
+void localStructTest() {
+  StructWithPtr St;
+  StructWithPtr *pSt = &St;
+  pSt->memP = malloc(12); // expected-warning{{Memory is never released; potential leak}}
 }
 
 // Test double assignment through integers.
@@ -896,3 +958,87 @@ void test_double_assign_ints_positive()
   (void*)(long)(unsigned long)ptr; // expected-warning {{unused}} expected-warning {{leak}}
 }
 
+
+void testCGContextNoLeak()
+{
+  void *ptr = malloc(16);
+  CGContextRef context = CGBitmapContextCreate(ptr);
+
+  // Because you can get the data back out like this, even much later,
+  // CGBitmapContextCreate is one of our "stop-tracking" exceptions.
+  free(CGBitmapContextGetData(context));
+}
+
+void testCGContextLeak()
+{
+  void *ptr = malloc(16);
+  CGContextRef context = CGBitmapContextCreate(ptr);
+  // However, this time we're just leaking the data, because the context
+  // object doesn't escape and it hasn't been freed in this function.
+}
+
+// Allow xpc context to escape. radar://11635258
+// TODO: Would be great if we checked that the finalize_connection_context actually releases it.
+static void finalize_connection_context(void *ctx) {
+  int *context = ctx;
+  free(context);
+}
+void foo (xpc_connection_t peer) {
+  int *ctx = calloc(1, sizeof(int));
+  xpc_connection_set_context(peer, ctx);
+  xpc_connection_set_finalizer_f(peer, finalize_connection_context);
+  xpc_connection_resume(peer);
+}
+
+// Make sure we catch errors when we free in a function which does not allocate memory.
+void freeButNoMalloc(int *p, int x){
+  if (x) {
+    free(p);
+    //user forgot a return here.
+  }
+  free(p); // expected-warning {{Attempt to free released memory}}
+}
+
+struct HasPtr {
+  char *p;
+};
+
+char* reallocButNoMalloc(struct HasPtr *a, int c, int size) {
+  int *s;
+  char *b = realloc(a->p, size);
+  char *m = realloc(a->p, size); // expected-warning {{Attempt to free released memory}}
+  return a->p;
+}
+
+// We should not warn in this case since the caller will presumably free a->p in all cases.
+int reallocButNoMallocPR13674(struct HasPtr *a, int c, int size) {
+  int *s;
+  char *b = realloc(a->p, size);
+  if (b == 0)
+    return -1;
+  a->p = b;
+  return 0;
+}
+
+// Test realloc with no visible malloc.
+void *test(void *ptr) {
+  void *newPtr = realloc(ptr, 4);
+  if (newPtr == 0) {
+    if (ptr)
+      free(ptr); // no-warning
+  }
+  return newPtr;
+}
+
+// ----------------------------------------------------------------------------
+// False negatives.
+
+// TODO: This is another false negative.
+void testMallocWithParam(int **p) {
+  *p = (int*) malloc(sizeof(int));
+  *p = 0;
+}
+
+void testMallocWithParam_2(int **p) {
+  *p = (int*) malloc(sizeof(int));
+}

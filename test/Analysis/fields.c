@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -analyze -analyzer-checker=core,experimental.core %s -analyzer-store=region -verify
+// RUN: %clang_cc1 -analyze -analyzer-checker=core,alpha.core %s -analyzer-store=region -verify
 
 unsigned foo();
 typedef struct bf { unsigned x:2; } bf;
@@ -25,4 +25,11 @@ Point getit(void);
 void test() {
   Point p;
   (void)(p = getit()).x;
+}
+
+
+void testNullAddress() {
+  Point *p = 0;
+  int *px = &p->x; // expected-warning{{Access to field 'x' results in a dereference of a null pointer (loaded from variable 'p')}}
+  *px = 1; // No warning because analysis stops at the previous line.
 }

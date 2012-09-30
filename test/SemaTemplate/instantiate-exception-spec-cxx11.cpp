@@ -34,18 +34,6 @@ template<> struct S<10> {};
 void (*pFn2)() noexcept = &S<0>::recurse; // expected-note {{instantiation of exception spec}} expected-error {{not superset}}
 
 
-template<typename T> T go(T a) noexcept(noexcept(go(a))); // \
-// expected-error 16{{call to function 'go' that is neither visible}} \
-// expected-note 16{{'go' should be declared prior to the call site}} \
-// expected-error {{recursive template instantiation exceeded maximum depth of 16}} \
-// expected-error {{use of undeclared identifier 'go'}} \
-
-void f() {
-  int k = go(0); // \
-  // expected-note {{in instantiation of exception specification for 'go<int>' requested here}}
-}
-
-
 namespace dr1330_example {
   template <class T> struct A {
     void f(...) throw (typename T::X); // expected-error {{'int'}}
@@ -131,3 +119,17 @@ template<typename T> struct Derived : Base {
 
 Derived<Exc1> d1; // ok
 Derived<Exc2> d2; // expected-note {{in instantiation of}}
+
+// If the vtable for a derived class is used, the exception specification of
+// any member function which ends up in that vtable is needed, even if it was
+// declared in a base class.
+namespace PR12763 {
+  template<bool *B> struct T {
+    virtual void f() noexcept (*B); // expected-error {{constant expression}} expected-note {{read of non-const}}
+  };
+  bool b; // expected-note {{here}}
+  struct X : public T<&b> {
+    virtual void g();
+  };
+  void X::g() {} // expected-note {{in instantiation of}}
+}

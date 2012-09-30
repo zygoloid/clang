@@ -365,6 +365,7 @@ namespace test7 {
     // CHECK-NEXT: invoke void @_ZN5test71BC1ERKNS_1AEPS0_(
     // CHECK:      store i1 false, i1* [[OUTER_NEW]]
     // CHECK:      phi
+    // CHECK-NEXT: store [[B]]*
 
     // Destroy the inner A object.
     // CHECK-NEXT: load i1* [[INNER_A]]
@@ -413,4 +414,40 @@ namespace test9 {
   // CHECK: define {{%.*}}* @_ZN5test94testEv
   // CHECK: [[TEST9_NEW:%.*]] = call noalias i8* @_Znam
   // CHECK: call void @_ZdaPv(i8* [[TEST9_NEW]])
+}
+
+// In a destructor with a function-try-block, a return statement in a
+// catch handler behaves differently from running off the end of the
+// catch handler.  PR13102.
+namespace test10 {
+  extern void cleanup();
+  extern bool suppress;
+
+  struct A { ~A(); };
+  A::~A() try { cleanup(); } catch (...) { return; }
+  // CHECK:    define void @_ZN6test101AD1Ev(
+  // CHECK:      invoke void @_ZN6test107cleanupEv()
+  // CHECK-NOT:  rethrow
+  // CHECK:      ret void
+
+  struct B { ~B(); };
+  B::~B() try { cleanup(); } catch (...) {}
+  // CHECK:    define void @_ZN6test101BD1Ev(
+  // CHECK:      invoke void @_ZN6test107cleanupEv()
+  // CHECK:      call i8* @__cxa_begin_catch
+  // CHECK-NEXT: invoke void @__cxa_rethrow()
+  // CHECK:      unreachable
+
+  struct C { ~C(); };
+  C::~C() try { cleanup(); } catch (...) { if (suppress) return; }
+  // CHECK:    define void @_ZN6test101CD1Ev(
+  // CHECK:      invoke void @_ZN6test107cleanupEv()
+  // CHECK:      call i8* @__cxa_begin_catch
+  // CHECK-NEXT: load i8* @_ZN6test108suppressE, align 1
+  // CHECK-NEXT: trunc
+  // CHECK-NEXT: br i1
+  // CHECK:      call void @__cxa_end_catch()
+  // CHECK-NEXT: br label
+  // CHECK:      invoke void @__cxa_rethrow()
+  // CHECK:      unreachable
 }
