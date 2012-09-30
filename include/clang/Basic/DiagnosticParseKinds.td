@@ -679,6 +679,9 @@ def warn_cxx98_compat_lambda : Warning<
   InGroup<CXX98Compat>, DefaultIgnore;
 def err_lambda_missing_parens : Error<
   "lambda requires '()' before %select{'mutable'|return type}0">;
+def ext_mutable_lambda : ExtWarn<
+  "the 'mutable' keyword is redundant and deprecated in C++1y">,
+  InGroup<DiagGroup<"mutable-lambda">>;
 
 // Availability attribute
 def err_expected_version : Error<

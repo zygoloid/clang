@@ -399,7 +399,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     //   This function call operator is declared const (9.3.1) if and only if 
     //   the lambda-expression's parameter-declaration-clause is not followed 
     //   by mutable. It is neither virtual nor declared volatile. [...]
-    if (!FTI.hasMutableQualifier())
+    if (!FTI.hasMutableQualifier() || getLangOpts().CPlusPlus1y)
       FTI.TypeQuals |= DeclSpec::TQ_const;
     
     MethodTyInfo = GetTypeForDeclarator(ParamInfo, CurScope);

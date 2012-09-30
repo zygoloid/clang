@@ -10620,7 +10620,7 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       DeclRefType = CaptureType.getNonReferenceType();
       
       const CapturingScopeInfo::Capture &Cap = CSI->getCapture(Var);
-      if (Cap.isCopyCapture() &&
+      if (Cap.isCopyCapture() && !getLangOpts().CPlusPlus1y &&
           !(isa<LambdaScopeInfo>(CSI) && cast<LambdaScopeInfo>(CSI)->Mutable))
         DeclRefType.addConst();
       break;
@@ -10841,7 +10841,8 @@ bool Sema::tryCaptureVariable(VarDecl *Var, SourceLocation Loc,
       //   declared const (9.3.1) if and only if the lambda-expression’s 
       //   parameter-declaration-clause is not followed by mutable.
       DeclRefType = CaptureType.getNonReferenceType();
-      if (!LSI->Mutable && !CaptureType->isReferenceType())
+      if (!LSI->Mutable && !CaptureType->isReferenceType() &&
+          !getLangOpts().CPlusPlus1y)
         DeclRefType.addConst();      
     }
     

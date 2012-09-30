@@ -1,0 +1,3 @@
+Only implemented part 2 (mutable is implicit).
+
+For part 1: If we're capturing individual members, should we allow them in the capture list too? Presumably yes. What happens if I explicitly capture 'this', with no capture default, then try to use members of 'this'? Needs more design work.

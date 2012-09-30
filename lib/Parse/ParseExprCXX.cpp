@@ -777,6 +777,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
     if (Tok.is(tok::kw_mutable)) {
       MutableLoc = ConsumeToken();
       DeclEndLoc = MutableLoc;
+      if (getLangOpts().CPlusPlus1y)
+        Diag(MutableLoc, diag::ext_mutable_lambda) << CreateRemoval(MutableLoc);
     }
 
     // Parse exception-specification[opt].
