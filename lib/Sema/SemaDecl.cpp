@@ -7812,7 +7812,8 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
   if (FD) {
     FD->setBody(Body);
 
-    if (getLangOpts().CPlusPlus1y && !FD->isInvalidDecl()) {
+    if (getLangOpts().CPlusPlus1y && !FD->isInvalidDecl() &&
+        !FD->isDependentContext()) {
       AutoType *AT = FD->getResultType()->getContainedAutoType();
       if (AT && !AT->isDeduced()) {
         // If the function has a deduced result type but contains no 'return'

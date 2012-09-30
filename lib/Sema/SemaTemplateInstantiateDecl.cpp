@@ -1335,6 +1335,11 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(FunctionDecl *D,
       PrincipalDecl->isInIdentifierNamespace(Decl::IDNS_Ordinary))
     PrincipalDecl->setNonMemberOperator();
 
+  if (SemaRef.getLangOpts().CPlusPlus1y &&
+      Function->getResultType()->getContainedAutoType())
+    SemaRef.InstantiateFunctionDefinition(Function->getPointOfInstantiation(),
+                                          Function, false, true);
+
   assert(!D->isDefaulted() && "only methods should be defaulted");
   return Function;
 }
@@ -1600,6 +1605,11 @@ TemplateDeclInstantiator::VisitCXXMethodDecl(CXXMethodDecl *D,
     assert(!D->isDefaulted() &&
            "should not implicitly default uninstantiated function");
   }
+
+  if (SemaRef.getLangOpts().CPlusPlus1y &&
+      Method->getResultType()->getContainedAutoType())
+    SemaRef.InstantiateFunctionDefinition(Method->getPointOfInstantiation(),
+                                          Method, false, true);
 
   return Method;
 }

@@ -91,6 +91,17 @@ const auto void_ret_4() {
   return 0; // expected-error {{'auto' in return type deduced as 'int' here but deduced as 'void' in earlier return statement}}
 }
 
+namespace Templates {
+  template<typename T> auto f1() {
+    return T() + 1;
+  }
+  template<typename T> auto &f2(T &&v) { return v; }
+  int a = f1<int>();
+  const int &b = f2(0);
+  double d;
+  float &c = f2(0.0); // expected-error {{non-const lvalue reference to type 'float' cannot bind to a value of unrelated type 'double'}}
+}
+
 #if 0
 auto fwd_decl_using();
 namespace N { using ::fwd_decl_using; }

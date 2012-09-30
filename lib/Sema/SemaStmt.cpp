@@ -2446,7 +2446,7 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
 
   // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
   // deduction.
-  if (getLangOpts().CPlusPlus1y)
+  if (getLangOpts().CPlusPlus1y && !CurContext->isDependentContext())
     if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CurContext))
       if (AutoType *AT = FD->getResultType()->getContainedAutoType())
         if (DeduceFunctionTypeFromReturnExpr(FD, ReturnLoc, RetValExp, AT)) {
