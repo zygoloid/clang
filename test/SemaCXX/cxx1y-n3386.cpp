@@ -18,8 +18,9 @@ auto a();
 auto a() { return 0; }
 using T = decltype(a());
 using T = int;
-auto a();
+auto a(); // expected-note {{previous}}
 using T = decltype(a());
+auto *a(); // expected-error {{differ only in their return type}}
 
 auto b(bool k) {
   if (k)
