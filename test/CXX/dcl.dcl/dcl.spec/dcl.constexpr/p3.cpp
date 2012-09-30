@@ -96,29 +96,29 @@ constexpr int ForStmt() {
     return 0;
 }
 constexpr int VarDecl() {
-  constexpr int a = 0; // expected-error {{variables cannot be declared in a constexpr function}}
+  constexpr int a = 0; // expected-warning {{C++11 does not allow variable declarations in a constexpr function}}
   return 0;
 }
 constexpr int FuncDecl() {
-  constexpr int ForwardDecl(int); // expected-error {{statement not allowed in constexpr function}}
+  constexpr int ForwardDecl(int); // expected-warning {{C++11 does not allow this statement in a constexpr function}}
   return ForwardDecl(42);
 }
 constexpr int ClassDecl1() {
-  typedef struct { } S1; // expected-error {{types cannot be defined in a constexpr function}}
+  typedef struct { } S1; // expected-warning {{C++11 does not allow type definitions in a constexpr function}}
   return 0;
 }
 constexpr int ClassDecl2() {
-  using S2 = struct { }; // expected-error {{types cannot be defined in a constexpr function}}
+  using S2 = struct { }; // expected-warning {{C++11 does not allow type definitions in a constexpr function}}
   return 0;
 }
 constexpr int ClassDecl3() {
-  struct S3 { }; // expected-error {{types cannot be defined in a constexpr function}}
+  struct S3 { }; // expected-warning {{C++11 does not allow type definitions in a constexpr function}}
   return 0;
 }
 constexpr int NoReturn() {} // expected-error {{no return statement in constexpr function}}
 constexpr int MultiReturn() {
   return 0; // expected-note {{return statement}}
-  return 0; // expected-error {{multiple return statements in constexpr function}}
+  return 0; // expected-warning {{C++11 does not allow multiple return statements in a constexpr function}}
 }
 
 //  - every constructor call and implicit conversion used in initializing the

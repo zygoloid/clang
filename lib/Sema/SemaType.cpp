@@ -4479,7 +4479,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
   QualType ElemType = Context.getBaseElementType(T);
   RequireCompleteType(Loc, ElemType, 0);
 
-  if (T->isLiteralType())
+  if (T->isLiteralType(Context))
     return false;
 
   if (Diagnoser.Suppressed)
@@ -4521,7 +4521,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
   } else if (RD->hasNonLiteralTypeFieldsOrBases()) {
     for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
          E = RD->bases_end(); I != E; ++I) {
-      if (!I->getType()->isLiteralType()) {
+      if (!I->getType()->isLiteralType(Context)) {
         Diag(I->getLocStart(),
              diag::note_non_literal_base_class)
           << RD << I->getType() << I->getSourceRange();
@@ -4530,7 +4530,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
     }
     for (CXXRecordDecl::field_iterator I = RD->field_begin(),
          E = RD->field_end(); I != E; ++I) {
-      if (!I->getType()->isLiteralType() ||
+      if (!I->getType()->isLiteralType(Context) ||
           I->getType().isVolatileQualified()) {
         Diag(I->getLocation(), diag::note_non_literal_field)
           << RD << *I << I->getType()

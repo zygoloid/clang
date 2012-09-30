@@ -1,21 +1,6 @@
-// RUN: %clang_cc1 -std=c++11 -verify -Wno-pedantic-constexpr %s -fcxx-exceptions
+// RUN: %clang_cc1 -std=c++1y -verify %s -fcxx-exceptions
 
 // Test for various constexpr extensions we support.
-
-// Non-literal types can have constexpr members.
-struct S {
-  S();
-
-  int arr[10];
-
-  // FIXME: There should be a way to write a constexpr but non-const
-  //        member function. Perhaps:
-  // constexpr int &get(int n) mutable { return arr[n]; }
-  constexpr const int &get(int n) { return arr[n]; }
-};
-
-const S s = S();
-static_assert(&s.get(4) - &s.get(2) == 2, "");
 
 // Compound-statements can be used in constexpr functions.
 constexpr int e() {{{{}} return 5; }}
@@ -127,3 +112,12 @@ constexpr int namespace_alias() {
   namespace N = NS;
   return N::n;
 }
+
+constexpr void ret_void() {}
+constexpr void ret_void_2(bool b) {
+  ret_void();
+  if (b)
+    return;
+  return ret_void();
+}
+constexpr int rv = (ret_void(), ret_void_2(false), ret_void_2(true), 1);

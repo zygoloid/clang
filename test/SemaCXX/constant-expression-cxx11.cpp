@@ -1393,7 +1393,7 @@ namespace TLS {
 
 namespace NamespaceAlias {
   constexpr int f() {
-    namespace NS = NamespaceAlias; // expected-error {{not allowed in constexpr function}}
+    namespace NS = NamespaceAlias; // expected-warning {{C++11 does not allow}}
     return &NS::f != nullptr;
   }
 }

@@ -209,7 +209,7 @@ static void computeDeclRefDependence(ASTContext &Ctx, NamedDecl *D, QualType T,
   //          expression that is value-dependent [C++11]
   if (VarDecl *Var = dyn_cast<VarDecl>(D)) {
     if ((Ctx.getLangOpts().CPlusPlus0x ?
-           Var->getType()->isLiteralType() :
+           Var->getType()->isLiteralType(Ctx) :
            Var->getType()->isIntegralOrEnumerationType()) &&
         (Var->getType().isConstQualified() ||
          Var->getType()->isReferenceType())) {

@@ -1495,17 +1495,17 @@ def err_constexpr_non_literal_param : Error<
 def err_constexpr_body_invalid_stmt : Error<
   "statement not allowed in constexpr %select{function|constructor}0">;
 def ext_constexpr_body_invalid_stmt : ExtWarn<
-  "statement not allowed in constexpr %select{function|constructor}0">,
-  InGroup<PedanticConstexpr>, DefaultError;
+  "C++11 does not allow this statement in a constexpr "
+  "%select{function|constructor}0">, InGroup<CXX1y>;
 def ext_constexpr_type_definition : ExtWarn<
-  "types cannot be defined in a constexpr %select{function|constructor}0">,
-  InGroup<PedanticConstexpr>, DefaultError;
+  "C++11 does not allow type definitions in a constexpr "
+  "%select{function|constructor}0">, InGroup<CXX1y>;
 def err_constexpr_vla : Error<
   "variably-modified type %0 cannot be used in a constexpr "
   "%select{function|constructor}1">;
 def ext_constexpr_var_declaration : ExtWarn<
-  "variables cannot be declared in a constexpr %select{function|constructor}0">,
-  InGroup<PedanticConstexpr>, DefaultError;
+  "C++11 does not allow variable declarations in a constexpr "
+  "%select{function|constructor}0">, InGroup<CXX1y>;
 def err_constexpr_var_declaration_static_non_ce : Error<
   "static variable in constexpr %select{function|constructor}0 must be "
   "initialized by a constant expression">;
@@ -1515,8 +1515,8 @@ def err_constexpr_function_never_constant_expr : ExtWarn<
 def err_constexpr_body_no_return : Error<
   "no return statement in constexpr function">;
 def ext_constexpr_body_multiple_return : ExtWarn<
-  "multiple return statements in constexpr function">,
-  InGroup<PedanticConstexpr>, DefaultError;
+  "C++11 does not allow multiple return statements in a constexpr function">,
+  InGroup<CXX1y>;
 def note_constexpr_body_previous_return : Note<
   "previous return statement is here">;
 def err_constexpr_function_try_block : Error<
@@ -1527,9 +1527,8 @@ def err_constexpr_ctor_missing_init : Error<
   "constexpr constructor must initialize all members">;
 def note_constexpr_ctor_missing_init : Note<
   "member not initialized by constructor">;
-def ext_constexpr_method_non_literal : ExtWarn<
-  "non-literal type %0 cannot have constexpr members">,
-  InGroup<PedanticConstexpr>, DefaultError;
+def err_constexpr_method_non_literal : Error<
+  "non-literal type %0 cannot have constexpr members">;
 def note_non_literal_no_constexpr_ctors : Note<
   "%0 is not literal because it is not an aggregate and has no constexpr "
   "constructors other than copy or move constructors">;

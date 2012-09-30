@@ -1112,7 +1112,7 @@ bool QualType::isTriviallyCopyableType(ASTContext &Context) const {
 
 
 
-bool Type::isLiteralType() const {
+bool Type::isLiteralType(ASTContext &Ctx) const {
   if (isDependentType())
     return false;
 
@@ -1126,6 +1126,10 @@ bool Type::isLiteralType() const {
     return false;
   const Type *BaseTy = getBaseElementTypeUnsafe();
   assert(BaseTy && "NULL element type");
+
+  // C++1y: void is a literal type.
+  if (Ctx.getLangOpts().CPlusPlus1y && BaseTy->isVoidType())
+    return true;
 
   // Return false for incomplete types after skipping any incomplete array
   // types; those are expressly allowed by the standard and thus our API.

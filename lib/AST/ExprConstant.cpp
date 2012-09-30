@@ -1029,7 +1029,7 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
 /// Check that this core constant expression is of literal type, and if not,
 /// produce an appropriate diagnostic.
 static bool CheckLiteralType(EvalInfo &Info, const Expr *E) {
-  if (!E->isRValue() || E->getType()->isLiteralType())
+  if (!E->isRValue() || E->getType()->isLiteralType(Info.Ctx))
     return true;
 
   // Prvalue constant expressions must be of literal types.
@@ -1905,7 +1905,7 @@ static bool EvaluateObjectArgument(EvalInfo &Info, const Expr *Object,
   if (Object->isGLValue())
     return EvaluateLValue(Object, This, Info);
 
-  if (Object->getType()->isLiteralType())
+  if (Object->getType()->isLiteralType(Info.Ctx))
     return EvaluateTemporary(Object, This, Info);
 
   return false;
@@ -2239,8 +2239,11 @@ static bool HandleFunctionCall(SourceLocation CallLoc,
 
   CallStackFrame Frame(Info, CallLoc, Callee, This, ArgValues.data());
   EvalStmtResult ESR = EvaluateStmt(Result, Info, Body);
-  if (ESR == ESR_Succeeded)
+  if (ESR == ESR_Succeeded) {
+    if (Callee->getResultType()->isVoidType())
+      return true;
     Info.Diag(Callee->getLocEnd(), diag::note_constexpr_no_return);
+  }
   return ESR == ESR_Returned;
 }
 
@@ -6282,10 +6285,7 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
       return false;
     Result = Info.CurrentCall->Temporaries[E];
   } else if (E->getType()->isVoidType()) {
-    if (Info.getLangOpts().CPlusPlus0x)
-      Info.CCEDiag(E, diag::note_constexpr_nonliteral)
-        << E->getType();
-    else
+    if (!Info.getLangOpts().CPlusPlus0x)
       Info.CCEDiag(E, diag::note_invalid_subexpr_in_const_expr);
     if (!EvaluateVoid(E, Info))
       return false;

@@ -175,7 +175,6 @@ def ObjCReadonlyPropertyHasSetter : DiagGroup<"objc-readonly-with-setter-propert
 def ObjCRootClass : DiagGroup<"objc-root-class">;
 def Packed : DiagGroup<"packed">;
 def Padded : DiagGroup<"padded">;
-def PedanticConstexpr : DiagGroup<"pedantic-constexpr">;
 def PointerArith : DiagGroup<"pointer-arith">;
 def PoundWarning : DiagGroup<"#warnings">,
                    DiagCategory<"#warning Directive">;

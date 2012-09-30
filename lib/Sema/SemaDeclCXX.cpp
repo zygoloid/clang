@@ -767,6 +767,7 @@ static bool CheckConstexprDeclStmt(Sema &SemaRef, const FunctionDecl *Dcl,
     case Decl::UsingShadow:
     case Decl::UsingDirective:
     case Decl::UnresolvedUsingTypename:
+    case Decl::UnresolvedUsingValue:
       //   - static_assert-declarations
       //   - using-declarations,
       //   - using-directives,
@@ -791,7 +792,8 @@ static bool CheckConstexprDeclStmt(Sema &SemaRef, const FunctionDecl *Dcl,
     case Decl::Enum:
     case Decl::CXXRecord:
       // As an extension, we allow types to be defined, not just declared.
-      if (cast<TagDecl>(*DclIt)->isThisDeclarationADefinition())
+      if (cast<TagDecl>(*DclIt)->isThisDeclarationADefinition() &&
+          !SemaRef.getLangOpts().CPlusPlus1y)
         SemaRef.Diag(DS->getLocStart(), diag::ext_constexpr_type_definition)
           << isa<CXXConstructorDecl>(Dcl);
       continue;
@@ -810,12 +812,14 @@ static bool CheckConstexprDeclStmt(Sema &SemaRef, const FunctionDecl *Dcl,
           << isa<CXXConstructorDecl>(Dcl);
         return false;
       }
-      SemaRef.Diag(DS->getLocStart(), diag::ext_constexpr_var_declaration)
-        << isa<CXXConstructorDecl>(Dcl);
+      if (!SemaRef.getLangOpts().CPlusPlus1y)
+        SemaRef.Diag(DS->getLocStart(), diag::ext_constexpr_var_declaration)
+          << isa<CXXConstructorDecl>(Dcl);
       continue;
     }
 
     case Decl::NamespaceAlias:
+    case Decl::Function:
       ExtDiagLoc = DS->getLocStart();
       continue;
 
@@ -898,7 +902,8 @@ CheckConstexprFunctionStmt(Sema &SemaRef, const FunctionDecl *Dcl, Stmt *S,
     }
 
     // The return statement in a constexpr function must return a value.
-    if (!cast<ReturnStmt>(S)->getRetValue())
+    if (!cast<ReturnStmt>(S)->getRetValue() &&
+        !Dcl->getResultType()->isVoidType())
       break;
 
     ReturnStmts.push_back(S->getLocStart());
@@ -983,7 +988,7 @@ bool Sema::CheckConstexprFunctionBody(const FunctionDecl *Dcl, Stmt *Body) {
       return false;
   }
 
-  if (ExtLoc.isValid())
+  if (ExtLoc.isValid() && !getLangOpts().CPlusPlus1y)
     Diag(ExtLoc, diag::ext_constexpr_body_invalid_stmt)
       << isa<CXXConstructorDecl>(Dcl);
 
@@ -1040,11 +1045,11 @@ bool Sema::CheckConstexprFunctionBody(const FunctionDecl *Dcl, Stmt *Body) {
       }
     }
   } else {
-    if (ReturnStmts.empty()) {
+    if (ReturnStmts.empty() && !Dcl->getResultType()->isVoidType()) {
       Diag(Dcl->getLocation(), diag::err_constexpr_body_no_return);
       return false;
     }
-    if (ReturnStmts.size() > 1) {
+    if (ReturnStmts.size() > 1 && !getLangOpts().CPlusPlus1y) {
       Diag(ReturnStmts.back(), diag::ext_constexpr_body_multiple_return);
       for (unsigned I = 0; I < ReturnStmts.size() - 1; ++I)
         Diag(ReturnStmts[I], diag::note_constexpr_body_previous_return);
@@ -4017,7 +4022,7 @@ void Sema::CheckCompletedCXXClass(CXXRecordDecl *Record) {
         case TSK_Undeclared:
         case TSK_ExplicitSpecialization:
           RequireLiteralType(M->getLocation(), Context.getRecordType(Record),
-                             diag::ext_constexpr_method_non_literal);
+                             diag::err_constexpr_method_non_literal);
           break;
         }
 

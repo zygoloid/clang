@@ -86,22 +86,22 @@ struct V {
       /**/;
   }
   constexpr V(int(&)[2]) {
-    constexpr int a = 0; // expected-error {{variables cannot be declared in a constexpr constructor}}
+    constexpr int a = 0; // expected-warning {{C++11 does not allow variable declarations in a constexpr constructor}}
   }
   constexpr V(int(&)[3]) {
-    constexpr int ForwardDecl(int); // expected-error {{statement not allowed in constexpr constructor}}
+    constexpr int ForwardDecl(int); // expected-warning {{C++11 does not allow this statement in a constexpr constructor}}
   }
   constexpr V(int(&)[4]) {
-    typedef struct { } S1; // expected-error {{types cannot be defined in a constexpr constructor}}
+    typedef struct { } S1; // expected-warning {{C++11 does not allow type definitions in a constexpr constructor}}
   }
   constexpr V(int(&)[5]) {
-    using S2 = struct { }; // expected-error {{types cannot be defined in a constexpr constructor}}
+    using S2 = struct { }; // expected-warning {{C++11 does not allow type definitions in a constexpr constructor}}
   }
   constexpr V(int(&)[6]) {
-    struct S3 { }; // expected-error {{types cannot be defined in a constexpr constructor}}
+    struct S3 { }; // expected-warning {{C++11 does not allow type definitions in a constexpr constructor}}
   }
   constexpr V(int(&)[7]) {
-    return; // expected-error {{statement not allowed in constexpr constructor}}
+    return; // expected-warning {{C++11 does not allow this statement in a constexpr constructor}}
   }
 };
 
