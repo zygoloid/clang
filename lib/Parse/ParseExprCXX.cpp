@@ -778,7 +778,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
       MutableLoc = ConsumeToken();
       DeclEndLoc = MutableLoc;
       if (getLangOpts().CPlusPlus1y)
-        Diag(MutableLoc, diag::ext_mutable_lambda) << CreateRemoval(MutableLoc);
+        Diag(MutableLoc, diag::ext_mutable_lambda)
+          << FixItHint::CreateRemoval(MutableLoc);
     }
 
     // Parse exception-specification[opt].
