@@ -3523,7 +3523,7 @@ namespace {
       //   auto &&lref = lvalue;
       // must transform into "rvalue reference to T" not "rvalue reference to
       // auto type deduced as T" in order for [temp.deduct.call]p3 to apply.
-      if (isa<TemplateTypeParmType>(Replacement)) {
+      if (!Replacement.isNull() && isa<TemplateTypeParmType>(Replacement)) {
         QualType Result = Replacement;
         TemplateTypeParmTypeLoc NewTL = TLB.push<TemplateTypeParmTypeLoc>(Result);
         NewTL.setNameLoc(TL.getNameLoc());

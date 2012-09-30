@@ -2095,6 +2095,20 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, Decl *OldD, Scope *S) {
     //        cannot be overloaded.
     QualType OldReturnType = OldType->getResultType();
     QualType NewReturnType = cast<FunctionType>(NewQType)->getResultType();
+    if (NewReturnType->getContainedAutoType()) {
+      // If this function has a deduced return type and has already been
+      // defined, copy the deduced value from the old declaration.
+      AutoType *OldAT = Old->getResultType()->getContainedAutoType();
+      if (OldAT && OldAT->isDeduced()) {
+        QualType UndeducedOld = SubstAutoType(Old->getResultType(), QualType());
+        if (Context.hasSameUnqualifiedType(UndeducedOld, NewReturnType)) {
+          Context.adjustDeducedFunctionResultType(New, Old->getResultType());
+          NewType = New->getType()->castAs<FunctionType>();
+          NewQType = Context.getCanonicalType(New->getType());
+          NewReturnType = OldReturnType;
+        }
+      }
+    }
     QualType ResQT;
     if (OldReturnType != NewReturnType) {
       if (NewReturnType->isObjCObjectPointerType()

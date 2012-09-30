@@ -15,12 +15,11 @@ struct S {
 };
 
 auto a();
-auto a() { return 0; } // expected-note {{previous}}
+auto a() { return 0; }
 using T = decltype(a());
 using T = int;
-
-// FIXME:
-auto a(); // unexpected-error {{differ only in their return type}}
+auto a();
+using T = decltype(a());
 
 auto b(bool k) {
   if (k)
@@ -115,9 +114,7 @@ namespace Templates {
   typedef float dbl; // expected-error {{typedef redefinition with different types ('float' vs 'decltype(f2(1.2))' (aka 'double &'))}}
 }
 
-#if 0
 auto fwd_decl_using();
 namespace N { using ::fwd_decl_using; }
 auto fwd_decl_using() { return 0; }
 namespace N { int k = N::fwd_decl_using(); }
-#endif
