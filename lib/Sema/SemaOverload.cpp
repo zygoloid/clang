@@ -3386,6 +3386,17 @@ static bool isBetterReferenceBindingKind(const StandardConversionSequence &SCS1,
           !SCS2.IsLvalueReference);
 }
 
+/// \brief Is an integral conversion from \p From to \p To lossless?
+static bool isLosslessIntegralConversion(ASTContext &C, QualType From,
+                                         QualType To) {
+  bool FromSigned = From->isSignedIntegerType();
+  bool ToSigned = To->isSignedIntegerType();
+  unsigned FromWidth = C.getIntWidth(From);
+  unsigned ToWidth = C.getIntWidth(To);
+  return (ToSigned == FromSigned && ToWidth >= FromWidth) ||
+         (ToSigned && ToWidth > FromWidth);
+}
+
 /// CompareStandardConversionSequences - Compare two standard
 /// conversion sequences to determine whether one is better than the
 /// other or if they are indistinguishable (C++ 13.3.3.2p3).
@@ -3426,6 +3437,62 @@ CompareStandardConversionSequences(Sema &S,
     return SCS2.isPointerConversionToBool()
              ? ImplicitConversionSequence::Better
              : ImplicitConversionSequence::Worse;
+
+  if (S.getLangOpts().CPlusPlus1y &&
+      (SCS1.Second == ICK_Integral_Conversion ||
+       SCS1.Second == ICK_Integral_Promotion) &&
+      (SCS2.Second == ICK_Integral_Conversion ||
+       SCS2.Second == ICK_Integral_Promotion)) {
+    // C++1y [over.ics.rank]p4:
+    QualType From1 = SCS1.getToType(0);
+    QualType To1 = SCS1.getToType(1);
+    QualType From2 = SCS1.getToType(0);
+    QualType To2 = SCS2.getToType(1);
+
+    // A [...lossless...] conversion is better than a [...lossy...] conversion.
+    bool Lossless1 = isLosslessIntegralConversion(S.Context, From1, To1);
+    bool Lossless2 = isLosslessIntegralConversion(S.Context, From2, To2);
+    if (Lossless1 != Lossless2)
+      return Lossless1 ? ImplicitConversionSequence::Better
+                       : ImplicitConversionSequence::Worse;
+
+    if (Lossless1 && Lossless2) {
+      int F1Rank = S.Context.getIntegerRank(From1.getTypePtr());
+      int T1Rank = S.Context.getIntegerRank(To1.getTypePtr());
+      int F2Rank = S.Context.getIntegerRank(From2.getTypePtr());
+      int T2Rank = S.Context.getIntegerRank(To2.getTypePtr());
+
+      bool ToHigherRank = F1Rank > T1Rank && F2Rank > T2Rank;
+
+      if (S.Context.hasSameUnqualifiedType(From1, From2)) {
+        // Converting from a common type. If both conversions increase rank,
+        // go for the smallest increase. Otherwise, prefer not to add a sign
+        // bit.
+        //  (a) long -> int
+        //  (b) long -> long long
+        // If sizeof(int) == sizeof(long), ambiguous. Otherwise, pick (b).
+        if (T1Rank != T2Rank && ToHigherRank)
+          return T2Rank > T1Rank ? ImplicitConversionSequence::Better
+                                 : ImplicitConversionSequence::Worse;
+        else if (From1->isUnsignedIntegerType() &&
+             To1->isUnsignedIntegerType() + To2->isUnsignedIntegerType() == 1)
+          return To1->isUnsignedIntegerType()
+              ? ImplicitConversionSequence::Better
+              : ImplicitConversionSequence::Worse;
+      }
+
+      if (S.Context.hasSameUnqualifiedType(To1, To2)) {
+        if (F1Rank != F2Rank && ToHigherRank)
+          return F2Rank > F1Rank ? ImplicitConversionSequence::Better
+                                 : ImplicitConversionSequence::Worse;
+        else if (To1->isSignedIntegerType() &&
+             From1->isSignedIntegerType() + From2->isSignedIntegerType() == 1)
+          return From1->isSignedIntegerType()
+              ? ImplicitConversionSequence::Better
+              : ImplicitConversionSequence::Worse;
+      }
+    }
+  }
 
   // C++ [over.ics.rank]p4b2:
   //

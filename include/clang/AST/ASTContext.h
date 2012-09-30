@@ -1782,11 +1782,9 @@ public:
       return (*AddrSpaceMap)[AS - LangAS::Offset];
   }
 
-private:
   // Helper for integer ordering
   unsigned getIntegerRank(const Type *T) const;
 
-public:
 
   //===--------------------------------------------------------------------===//
   //                    Type Compatibility Predicates

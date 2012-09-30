@@ -1,0 +1,13 @@
+Alternative 2:
+
+This seems broken. Suppose we have:
+
+int f(int); // #1
+int f(long long); // #2
+int i = f(0l);
+
+If 'int' can represent all the values of 'long', this is ambiguous, because the
+functions are unordered. The rank ordering does not apply because the rank of
+int (T2 or T3) is less than the rank of long (T1).
+
+Suggest only applying the signedness disambiguation if the rank of the target is >= the rank of the source (so we always pick #2).
