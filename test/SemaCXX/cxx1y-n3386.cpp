@@ -105,7 +105,14 @@ namespace Templates {
   int e = fwd_decl<int>(); // expected-error {{cannot be used before it is defined}}
   template<typename T> auto fwd_decl() { return 0; }
   int f = fwd_decl<int>();
+  template<typename T> auto fwd_decl();
   int g = fwd_decl<char>();
+
+  auto (*p)() = f1; // expected-error {{incompatible initializer}}
+  auto (*q)() = f1<int>; // ok
+
+  typedef decltype(f2(1.2)) dbl; // expected-note {{previous}}
+  typedef float dbl; // expected-error {{typedef redefinition with different types ('float' vs 'decltype(f2(1.2))' (aka 'double &'))}}
 }
 
 #if 0
