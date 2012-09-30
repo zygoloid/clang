@@ -1,0 +1,3 @@
+ * 'operator auto' is permitted by the proposal, but was also proposed on -ext as meaning something else.
+ * is 'auto main();' legal? is 'auto main() {}' legal? (implicitly 'int' or 'void'?)
+ * extern template auto f<int>(); ?

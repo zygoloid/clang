@@ -113,6 +113,12 @@ namespace Templates {
 
   typedef decltype(f2(1.2)) dbl; // expected-note {{previous}}
   typedef float dbl; // expected-error {{typedef redefinition with different types ('float' vs 'decltype(f2(1.2))' (aka 'double &'))}}
+
+  extern template auto fwd_decl<double>();
+  int k1 = fwd_decl<double>(); // expected-error {{cannot be used before it is defined}}
+  // FIXME: what is the right behavior here?
+  extern template int fwd_decl<char>();
+  int k2 = fwd_decl<char>();
 }
 
 auto fwd_decl_using();
