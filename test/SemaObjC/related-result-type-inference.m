@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -verify -Wno-objc-root-class %s
+// RUN: %clang_cc1 -verify -Wno-deprecated-declarations -Wno-objc-root-class %s
 
 @interface Unrelated
 @end
@@ -175,6 +175,12 @@ void test_inference() {
 @implementation Fail
 - (id<X>) initWithX
 {
-  return (id)self; // expected-warning {{returning 'Fail *' from a function with incompatible result type 'id<X>'}}
+  return (id)self; // expected-warning {{casting 'Fail *' to incompatible type 'id<X>'}}
 }
+@end
+
+// <rdar://problem/11460990>
+
+@interface WeirdNSString : NSString
+- (id)initWithCString:(const char*)string, void *blah;
 @end

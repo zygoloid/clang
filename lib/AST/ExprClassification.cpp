@@ -11,14 +11,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/ErrorHandling.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ASTContext.h"
+#include "clang/AST/DeclCXX.h"
+#include "clang/AST/DeclObjC.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
-#include "clang/AST/ASTContext.h"
-#include "clang/AST/DeclObjC.h"
-#include "clang/AST/DeclCXX.h"
-#include "clang/AST/DeclTemplate.h"
+#include "llvm/Support/ErrorHandling.h"
 using namespace clang;
 
 typedef Expr::Classification Cl;
@@ -33,21 +33,6 @@ static Cl::Kinds ClassifyConditional(ASTContext &Ctx,
                                      const Expr *falseExpr);
 static Cl::ModifiableType IsModifiable(ASTContext &Ctx, const Expr *E,
                                        Cl::Kinds Kind, SourceLocation &Loc);
-
-static Cl::Kinds ClassifyExprValueKind(const LangOptions &Lang,
-                                       const Expr *E,
-                                       ExprValueKind Kind) {
-  switch (Kind) {
-  case VK_RValue:
-    return Lang.CPlusPlus && E->getType()->isRecordType() ?
-      Cl::CL_ClassTemporary : Cl::CL_PRValue;
-  case VK_LValue:
-    return Cl::CL_LValue;
-  case VK_XValue:
-    return Cl::CL_XValue;
-  }
-  llvm_unreachable("Invalid value category of implicit cast.");
-}
 
 Cl Expr::ClassifyImpl(ASTContext &Ctx, SourceLocation *Loc) const {
   assert(!TR->isReferenceType() && "Expressions can't have reference type.");
@@ -77,6 +62,7 @@ Cl Expr::ClassifyImpl(ASTContext &Ctx, SourceLocation *Loc) const {
   case Cl::CL_MemberFunction:
   case Cl::CL_SubObjCPropertySetting:
   case Cl::CL_ClassTemporary:
+  case Cl::CL_ArrayTemporary:
   case Cl::CL_ObjCMessageRValue:
   case Cl::CL_PRValue: assert(getValueKind() == VK_RValue); break;
   }
@@ -85,6 +71,32 @@ Cl Expr::ClassifyImpl(ASTContext &Ctx, SourceLocation *Loc) const {
   if (Loc)
     modifiable = IsModifiable(Ctx, this, kind, *Loc);
   return Classification(kind, modifiable);
+}
+
+/// Classify an expression which creates a temporary, based on its type.
+static Cl::Kinds ClassifyTemporary(QualType T) {
+  if (T->isRecordType())
+    return Cl::CL_ClassTemporary;
+  if (T->isArrayType())
+    return Cl::CL_ArrayTemporary;
+
+  // No special classification: these don't behave differently from normal
+  // prvalues.
+  return Cl::CL_PRValue;
+}
+
+static Cl::Kinds ClassifyExprValueKind(const LangOptions &Lang,
+                                       const Expr *E,
+                                       ExprValueKind Kind) {
+  switch (Kind) {
+  case VK_RValue:
+    return Lang.CPlusPlus ? ClassifyTemporary(E->getType()) : Cl::CL_PRValue;
+  case VK_LValue:
+    return Cl::CL_LValue;
+  case VK_XValue:
+    return Cl::CL_XValue;
+  }
+  llvm_unreachable("Invalid value category of implicit cast.");
 }
 
 static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
@@ -121,13 +133,14 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
     // ObjC instance variables are lvalues
     // FIXME: ObjC++0x might have different rules
   case Expr::ObjCIvarRefExprClass:
+  case Expr::FunctionParmPackExprClass:
     return Cl::CL_LValue;
 
     // C99 6.5.2.5p5 says that compound literals are lvalues.
-    // In C++, they're class temporaries.
+    // In C++, they're prvalue temporaries.
   case Expr::CompoundLiteralExprClass:
-    return Ctx.getLangOpts().CPlusPlus? Cl::CL_ClassTemporary 
-                                         : Cl::CL_LValue;
+    return Ctx.getLangOpts().CPlusPlus ? ClassifyTemporary(E->getType())
+                                       : Cl::CL_LValue;
 
     // Expressions that are prvalues.
   case Expr::CXXBoolLiteralExprClass:
@@ -417,7 +430,7 @@ static Cl::Kinds ClassifyUnnamed(ASTContext &Ctx, QualType T) {
     return Cl::CL_LValue;
   const RValueReferenceType *RV = T->getAs<RValueReferenceType>();
   if (!RV) // Could still be a class temporary, though.
-    return T->isRecordType() ? Cl::CL_ClassTemporary : Cl::CL_PRValue;
+    return ClassifyTemporary(T);
 
   return RV->getPointeeType()->isFunctionType() ? Cl::CL_LValue : Cl::CL_XValue;
 }
@@ -602,6 +615,7 @@ Expr::LValueClassification Expr::ClassifyLValue(ASTContext &Ctx) const {
   case Cl::CL_MemberFunction: return LV_MemberFunction;
   case Cl::CL_SubObjCPropertySetting: return LV_SubObjCPropertySetting;
   case Cl::CL_ClassTemporary: return LV_ClassTemporary;
+  case Cl::CL_ArrayTemporary: return LV_ArrayTemporary;
   case Cl::CL_ObjCMessageRValue: return LV_InvalidMessageExpression;
   case Cl::CL_PRValue: return LV_InvalidExpression;
   }
@@ -622,6 +636,7 @@ Expr::isModifiableLvalue(ASTContext &Ctx, SourceLocation *Loc) const {
   case Cl::CL_MemberFunction: return MLV_MemberFunction;
   case Cl::CL_SubObjCPropertySetting: return MLV_SubObjCPropertySetting;
   case Cl::CL_ClassTemporary: return MLV_ClassTemporary;
+  case Cl::CL_ArrayTemporary: return MLV_ArrayTemporary;
   case Cl::CL_ObjCMessageRValue: return MLV_InvalidMessageExpression;
   case Cl::CL_PRValue:
     return VC.getModifiable() == Cl::CM_LValueCast ?

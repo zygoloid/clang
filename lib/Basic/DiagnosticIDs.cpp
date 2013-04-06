@@ -17,7 +17,6 @@
 #include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
-
 #include <map>
 using namespace clang;
 
@@ -79,6 +78,7 @@ static const StaticDiagInfoRec StaticDiagInfo[] = {
 #include "clang/Basic/DiagnosticLexKinds.inc"
 #include "clang/Basic/DiagnosticParseKinds.inc"
 #include "clang/Basic/DiagnosticASTKinds.inc"
+#include "clang/Basic/DiagnosticCommentKinds.inc"
 #include "clang/Basic/DiagnosticSemaKinds.inc"
 #include "clang/Basic/DiagnosticAnalysisKinds.inc"
 #undef DIAG
@@ -107,16 +107,51 @@ static const StaticDiagInfoRec *GetDiagInfo(unsigned DiagID) {
   }
 #endif
 
-  // Search the diagnostic table with a binary search.
-  StaticDiagInfoRec Find = { static_cast<unsigned short>(DiagID),
-                             0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-  const StaticDiagInfoRec *Found =
-    std::lower_bound(StaticDiagInfo, StaticDiagInfo + StaticDiagInfoSize, Find);
-  if (Found == StaticDiagInfo + StaticDiagInfoSize ||
-      Found->DiagID != DiagID)
+  // Out of bounds diag. Can't be in the table.
+  using namespace diag;
+  if (DiagID >= DIAG_UPPER_LIMIT)
     return 0;
 
+  // Compute the index of the requested diagnostic in the static table.
+  // 1. Add the number of diagnostics in each category preceeding the
+  //    diagnostic and of the category the diagnostic is in. This gives us
+  //    the offset of the category in the table.
+  // 2. Subtract the number of IDs in each category from our ID. This gives us
+  //    the offset of the diagnostic in the category.
+  // This is cheaper than a binary search on the table as it doesn't touch
+  // memory at all.
+  unsigned Offset = 0;
+  unsigned ID = DiagID;
+#define DIAG_START_COMMON 0 // Sentinel value.
+#define CATEGORY(NAME, PREV) \
+  if (DiagID > DIAG_START_##NAME) { \
+    Offset += NUM_BUILTIN_##PREV##_DIAGNOSTICS - DIAG_START_##PREV - 1; \
+    ID -= DIAG_START_##NAME - DIAG_START_##PREV; \
+  }
+CATEGORY(DRIVER, COMMON)
+CATEGORY(FRONTEND, DRIVER)
+CATEGORY(SERIALIZATION, FRONTEND)
+CATEGORY(LEX, SERIALIZATION)
+CATEGORY(PARSE, LEX)
+CATEGORY(AST, PARSE)
+CATEGORY(COMMENT, AST)
+CATEGORY(SEMA, COMMENT)
+CATEGORY(ANALYSIS, SEMA)
+#undef CATEGORY
+#undef DIAG_START_COMMON
+
+  // Avoid out of bounds reads.
+  if (ID + Offset >= StaticDiagInfoSize)
+    return 0;
+
+  assert(ID < StaticDiagInfoSize && Offset < StaticDiagInfoSize);
+
+  const StaticDiagInfoRec *Found = &StaticDiagInfo[ID + Offset];
+  // If the diag id doesn't match we found a different diag, abort. This can
+  // happen when this function is called with an ID that points into a hole in
+  // the diagID space.
+  if (Found->DiagID != DiagID)
+    return 0;
   return Found;
 }
 
@@ -246,14 +281,14 @@ namespace clang {
       /// diagnostic.
       StringRef getDescription(unsigned DiagID) const {
         assert(this && DiagID-DIAG_UPPER_LIMIT < DiagInfo.size() &&
-               "Invalid diagnosic ID");
+               "Invalid diagnostic ID");
         return DiagInfo[DiagID-DIAG_UPPER_LIMIT].second;
       }
 
       /// getLevel - Return the level of the specified custom diagnostic.
       DiagnosticIDs::Level getLevel(unsigned DiagID) const {
         assert(this && DiagID-DIAG_UPPER_LIMIT < DiagInfo.size() &&
-               "Invalid diagnosic ID");
+               "Invalid diagnostic ID");
         return DiagInfo[DiagID-DIAG_UPPER_LIMIT].first;
       }
 
@@ -290,7 +325,7 @@ DiagnosticIDs::~DiagnosticIDs() {
 }
 
 /// getCustomDiagID - Return an ID for a diagnostic with the specified message
-/// and level.  If this is the first request for this diagnosic, it is
+/// and level.  If this is the first request for this diagnostic, it is
 /// registered and created, otherwise the existing ID is returned.
 unsigned DiagnosticIDs::getCustomDiagID(Level L, StringRef Message) {
   if (CustomDiagInfo == 0)
@@ -357,7 +392,7 @@ DiagnosticIDs::getDiagnosticLevel(unsigned DiagID, SourceLocation Loc,
     return CustomDiagInfo->getLevel(DiagID);
 
   unsigned DiagClass = getBuiltinDiagClass(DiagID);
-  assert(DiagClass != CLASS_NOTE && "Cannot get diagnostic level of a note!");
+  if (DiagClass == CLASS_NOTE) return DiagnosticIDs::Note;
   return getDiagnosticLevel(DiagID, DiagClass, Loc, Diag);
 }
 
@@ -511,9 +546,8 @@ StringRef DiagnosticIDs::getWarningOptionForDiag(unsigned DiagID) {
 }
 
 void DiagnosticIDs::getDiagnosticsInGroup(
-  const WarningOption *Group,
-  llvm::SmallVectorImpl<diag::kind> &Diags) const
-{
+    const WarningOption *Group,
+    SmallVectorImpl<diag::kind> &Diags) const {
   // Add the members of the option diagnostic set.
   if (const short *Member = Group->Members) {
     for (; *Member != -1; ++Member)
@@ -528,9 +562,8 @@ void DiagnosticIDs::getDiagnosticsInGroup(
 }
 
 bool DiagnosticIDs::getDiagnosticsInGroup(
-  StringRef Group,
-  llvm::SmallVectorImpl<diag::kind> &Diags) const
-{
+    StringRef Group,
+    SmallVectorImpl<diag::kind> &Diags) const {
   WarningOption Key = { Group.size(), Group.data(), 0, 0 };
   const WarningOption *Found =
   std::lower_bound(OptionTable, OptionTable + OptionTableSize, Key,
@@ -544,7 +577,7 @@ bool DiagnosticIDs::getDiagnosticsInGroup(
 }
 
 void DiagnosticIDs::getAllDiagnostics(
-                               llvm::SmallVectorImpl<diag::kind> &Diags) const {
+                               SmallVectorImpl<diag::kind> &Diags) const {
   for (unsigned i = 0; i != StaticDiagInfoSize; ++i)
     Diags.push_back(StaticDiagInfo[i].DiagID);
 }
@@ -583,24 +616,9 @@ bool DiagnosticIDs::ProcessDiag(DiagnosticsEngine &Diag) const {
   assert(Diag.getClient() && "DiagnosticClient not set!");
 
   // Figure out the diagnostic level of this message.
-  DiagnosticIDs::Level DiagLevel;
   unsigned DiagID = Info.getID();
-
-  if (DiagID >= diag::DIAG_UPPER_LIMIT) {
-    // Handle custom diagnostics, which cannot be mapped.
-    DiagLevel = CustomDiagInfo->getLevel(DiagID);
-  } else {
-    // Get the class of the diagnostic.  If this is a NOTE, map it onto whatever
-    // the diagnostic level was for the previous diagnostic so that it is
-    // filtered the same as the previous diagnostic.
-    unsigned DiagClass = getBuiltinDiagClass(DiagID);
-    if (DiagClass == CLASS_NOTE) {
-      DiagLevel = DiagnosticIDs::Note;
-    } else {
-      DiagLevel = getDiagnosticLevel(DiagID, DiagClass, Info.getLocation(),
-                                     Diag);
-    }
-  }
+  DiagnosticIDs::Level DiagLevel
+    = getDiagnosticLevel(DiagID, Info.getLocation(), Diag);
 
   if (DiagLevel != DiagnosticIDs::Note) {
     // Record that a fatal error occurred only when we see a second
@@ -642,9 +660,13 @@ bool DiagnosticIDs::ProcessDiag(DiagnosticsEngine &Diag) const {
   if (DiagLevel >= DiagnosticIDs::Error) {
     if (isUnrecoverable(DiagID))
       Diag.UnrecoverableErrorOccurred = true;
-    
+
+    // Warnings which have been upgraded to errors do not prevent compilation.
+    if (isDefaultMappingAsError(DiagID))
+      Diag.UncompilableErrorOccurred = true;
+
+    Diag.ErrorOccurred = true;
     if (Diag.Client->IncludeInDiagnosticCounts()) {
-      Diag.ErrorOccurred = true;
       ++Diag.NumErrors;
     }
 
@@ -658,6 +680,14 @@ bool DiagnosticIDs::ProcessDiag(DiagnosticsEngine &Diag) const {
   }
 
   // Finally, report it.
+  EmitDiag(Diag, DiagLevel);
+  return true;
+}
+
+void DiagnosticIDs::EmitDiag(DiagnosticsEngine &Diag, Level DiagLevel) const {
+  Diagnostic Info(&Diag);
+  assert(DiagLevel != DiagnosticIDs::Ignored && "Cannot emit ignored diagnostics!");
+
   Diag.Client->HandleDiagnostic((DiagnosticsEngine::Level)DiagLevel, Info);
   if (Diag.Client->IncludeInDiagnosticCounts()) {
     if (DiagLevel == DiagnosticIDs::Warning)
@@ -665,8 +695,6 @@ bool DiagnosticIDs::ProcessDiag(DiagnosticsEngine &Diag) const {
   }
 
   Diag.CurDiagID = ~0U;
-
-  return true;
 }
 
 bool DiagnosticIDs::isUnrecoverable(unsigned DiagID) const {
@@ -694,4 +722,3 @@ bool DiagnosticIDs::isARCDiagnostic(unsigned DiagID) {
   unsigned cat = getCategoryNumberForDiag(DiagID);
   return DiagnosticIDs::getCategoryNameFromID(cat).startswith("ARC ");
 }
-

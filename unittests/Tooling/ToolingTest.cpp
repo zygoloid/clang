@@ -10,11 +10,13 @@
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclGroup.h"
+#include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
 #include "gtest/gtest.h"
+#include <string>
 
 namespace clang {
 namespace tooling {
@@ -52,11 +54,16 @@ class FindTopLevelDeclConsumer : public clang::ASTConsumer {
 };
 } // end namespace
 
-TEST(runToolOnCode, FindsTopLevelDeclOnEmptyCode) {
+TEST(runToolOnCode, FindsNoTopLevelDeclOnEmptyCode) {
   bool FoundTopLevelDecl = false;
   EXPECT_TRUE(runToolOnCode(
       new TestAction(new FindTopLevelDeclConsumer(&FoundTopLevelDecl)), ""));
+#if !defined(_MSC_VER)
+  EXPECT_FALSE(FoundTopLevelDecl);
+#else
+  // FIXME: LangOpts.MicrosoftExt appends "class type_info;"
   EXPECT_TRUE(FoundTopLevelDecl);
+#endif
 }
 
 namespace {
@@ -91,22 +98,92 @@ TEST(runToolOnCode, FindsClassDecl) {
 }
 
 TEST(newFrontendActionFactory, CreatesFrontendActionFactoryFromType) {
-  llvm::OwningPtr<FrontendActionFactory> Factory(
-    newFrontendActionFactory<SyntaxOnlyAction>());
-  llvm::OwningPtr<FrontendAction> Action(Factory->create());
+  OwningPtr<FrontendActionFactory> Factory(
+      newFrontendActionFactory<SyntaxOnlyAction>());
+  OwningPtr<FrontendAction> Action(Factory->create());
   EXPECT_TRUE(Action.get() != NULL);
 }
 
 struct IndependentFrontendActionCreator {
-  FrontendAction *newFrontendAction() { return new SyntaxOnlyAction; }
+  ASTConsumer *newASTConsumer() {
+    return new FindTopLevelDeclConsumer(NULL);
+  }
 };
 
 TEST(newFrontendActionFactory, CreatesFrontendActionFactoryFromFactoryType) {
   IndependentFrontendActionCreator Creator;
-  llvm::OwningPtr<FrontendActionFactory> Factory(
-    newFrontendActionFactory(&Creator));
-  llvm::OwningPtr<FrontendAction> Action(Factory->create());
+  OwningPtr<FrontendActionFactory> Factory(
+      newFrontendActionFactory(&Creator));
+  OwningPtr<FrontendAction> Action(Factory->create());
   EXPECT_TRUE(Action.get() != NULL);
+}
+
+TEST(ToolInvocation, TestMapVirtualFile) {
+  clang::FileManager Files((clang::FileSystemOptions()));
+  std::vector<std::string> Args;
+  Args.push_back("tool-executable");
+  Args.push_back("-Idef");
+  Args.push_back("-fsyntax-only");
+  Args.push_back("test.cpp");
+  clang::tooling::ToolInvocation Invocation(Args, new SyntaxOnlyAction, &Files);
+  Invocation.mapVirtualFile("test.cpp", "#include <abc>\n");
+  Invocation.mapVirtualFile("def/abc", "\n");
+  EXPECT_TRUE(Invocation.run());
+}
+
+struct VerifyEndCallback : public EndOfSourceFileCallback {
+  VerifyEndCallback() : Called(0), Matched(false) {}
+  virtual void run() {
+    ++Called;
+  }
+  ASTConsumer *newASTConsumer() {
+    return new FindTopLevelDeclConsumer(&Matched);
+  }
+  unsigned Called;
+  bool Matched;
+};
+
+#if !defined(_WIN32)
+TEST(newFrontendActionFactory, InjectsEndOfSourceFileCallback) {
+  VerifyEndCallback EndCallback;
+
+  FixedCompilationDatabase Compilations("/", std::vector<std::string>());
+  std::vector<std::string> Sources;
+  Sources.push_back("/a.cc");
+  Sources.push_back("/b.cc");
+  ClangTool Tool(Compilations, Sources);
+
+  Tool.mapVirtualFile("/a.cc", "void a() {}");
+  Tool.mapVirtualFile("/b.cc", "void b() {}");
+
+  Tool.run(newFrontendActionFactory(&EndCallback, &EndCallback));
+
+  EXPECT_TRUE(EndCallback.Matched);
+  EXPECT_EQ(2u, EndCallback.Called);
+}
+#endif
+
+struct SkipBodyConsumer : public clang::ASTConsumer {
+  /// Skip the 'skipMe' function.
+  virtual bool shouldSkipFunctionBody(Decl *D) {
+    FunctionDecl *F = dyn_cast<FunctionDecl>(D);
+    return F && F->getNameAsString() == "skipMe";
+  }
+};
+
+struct SkipBodyAction : public clang::ASTFrontendAction {
+  virtual ASTConsumer *CreateASTConsumer(CompilerInstance &Compiler,
+                                         StringRef) {
+    Compiler.getFrontendOpts().SkipFunctionBodies = true;
+    return new SkipBodyConsumer;
+  }
+};
+
+TEST(runToolOnCode, TestSkipFunctionBody) {
+  EXPECT_TRUE(runToolOnCode(new SkipBodyAction,
+                            "int skipMe() { an_error_here }"));
+  EXPECT_FALSE(runToolOnCode(new SkipBodyAction,
+                             "int skipMeNot() { an_error_here }"));
 }
 
 } // end namespace tooling

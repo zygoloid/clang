@@ -1,8 +1,8 @@
-// RUN: %clang_cc1 -triple i386-apple-darwin9 -fobjc-fragile-abi -fsyntax-only -verify -Wno-objc-root-class %s
+// RUN: %clang_cc1 -triple i386-apple-darwin9 -fobjc-runtime=macosx-fragile-10.5 -fsyntax-only -verify -Wno-objc-root-class %s
 
 @interface I 
 {
-	int IVAR; // expected-note{{ivar is declared here}}
+	int IVAR; // expected-note{{instance variable is declared here}}
 	int name;
 }
 @property int d1;
@@ -18,7 +18,7 @@
 @synthesize d1;		// expected-error {{synthesized property 'd1' must either be named the same as}}
 @dynamic    bad;	// expected-error {{property implementation must have its declaration in interface 'I'}}
 @synthesize prop_id;	// expected-error {{synthesized property 'prop_id' must either be named the same}}  // expected-note {{previous declaration is here}}
-@synthesize prop_id = IVAR;	// expected-error {{type of property 'prop_id' ('id') does not match type of ivar 'IVAR' ('int')}} // expected-error {{property 'prop_id' is already implemented}}
+@synthesize prop_id = IVAR;	// expected-error {{type of property 'prop_id' ('id') does not match type of instance variable 'IVAR' ('int')}} // expected-error {{property 'prop_id' is already implemented}}
 @synthesize name;	// OK! property with same name as an accessible ivar of same name
 @end
 

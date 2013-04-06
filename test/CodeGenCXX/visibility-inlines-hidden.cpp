@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fvisibility-inlines-hidden -emit-llvm -o - %s -O2 -disable-llvm-optzns | FileCheck %s
+// RUN: %clang_cc1 -triple i386-unknown-unknown -std=c++11 -fvisibility-inlines-hidden -emit-llvm -o - %s -O2 -disable-llvm-optzns | FileCheck %s
 
 // The trickery with optimization in the run line is to get IR
 // generation to emit available_externally function bodies, but not
@@ -107,4 +107,58 @@ namespace PR11642 {
   extern template class Foo<int>;
   template class Foo<int>;
   // CHECK: define weak_odr i32 @_ZN7PR116423FooIiE3fooEi
+}
+
+// Test that clang implements the new gcc behaviour for inline functions.
+// GCC PR30066.
+namespace test3 {
+  inline void foo(void) {
+  }
+  template<typename T>
+  inline void zed() {
+  }
+  template void zed<float>();
+  void bar(void) {
+    foo();
+    zed<int>();
+  }
+  // CHECK: define weak_odr void @_ZN5test33zedIfEEvv
+  // CHECK: define linkonce_odr hidden void @_ZN5test33fooEv
+  // CHECK: define linkonce_odr hidden void @_ZN5test33zedIiEEvv
+}
+
+namespace test4 {
+  extern inline __attribute__ ((__gnu_inline__))
+  void foo() {}
+  void bar() {
+    foo();
+  }
+  // CHECK: define available_externally void @_ZN5test43fooE
+}
+
+namespace test5 {
+  // just don't crash.
+  template <int> inline void Op();
+  class UnaryInstruction {
+    UnaryInstruction() {
+      Op<0>();
+    }
+  };
+  template <int Idx_nocapture> void Op() {
+  }
+}
+
+namespace test6 {
+  // just don't crash.
+  template <typename T>
+  void f(T x) {
+  }
+  struct C {
+    static void g() {
+      f([](){});
+    }
+  };
+  void g() {
+    C::g();
+  }
 }

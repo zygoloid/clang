@@ -11,7 +11,9 @@
 //  the Itanium C++ ABI mangling numbers for lambda expressions.
 //
 //===----------------------------------------------------------------------===//
+
 #include "clang/AST/LambdaMangleContext.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 
 using namespace clang;
@@ -21,10 +23,11 @@ unsigned LambdaMangleContext::getManglingNumber(CXXMethodDecl *CallOperator) {
     = CallOperator->getType()->getAs<FunctionProtoType>();
   ASTContext &Context = CallOperator->getASTContext();
   
-  QualType Key = Context.getFunctionType(Context.VoidTy, 
-                                         Proto->arg_type_begin(),
-                                         Proto->getNumArgs(),
-                                         FunctionProtoType::ExtProtoInfo());
+  QualType Key =
+    Context.getFunctionType(Context.VoidTy,
+                            ArrayRef<QualType>(Proto->arg_type_begin(),
+                                               Proto->getNumArgs()),
+                            FunctionProtoType::ExtProtoInfo());
   Key = Context.getCanonicalType(Key);
   return ++ManglingNumbers[Key->castAs<FunctionProtoType>()];
 }

@@ -229,7 +229,7 @@ v4i32 f55(v4i32 arg) { return arg+arg; }
 
 // CHECK: define void @f56(
 // CHECK: i8 signext %a0, %struct.s56_0* byval align 4 %a1,
-// CHECK: x86_mmx %a2.coerce, %struct.s56_1* byval align 4,
+// CHECK: i64 %a2.coerce, %struct.s56_1* byval align 4,
 // CHECK: i64 %a4.coerce, %struct.s56_2* byval align 4,
 // CHECK: <4 x i32> %a6, %struct.s56_3* byval align 16 %a7,
 // CHECK: <2 x double> %a8, %struct.s56_4* byval align 16 %a9,
@@ -238,7 +238,7 @@ v4i32 f55(v4i32 arg) { return arg+arg; }
 
 // CHECK:   call void (i32, ...)* @f56_0(i32 1,
 // CHECK: i32 %{{[^ ]*}}, %struct.s56_0* byval align 4 %{{[^ ]*}},
-// CHECK: x86_mmx %{{[^ ]*}}, %struct.s56_1* byval align 4 %{{[^ ]*}},
+// CHECK: i64 %{{[^ ]*}}, %struct.s56_1* byval align 4 %{{[^ ]*}},
 // CHECK: i64 %{{[^ ]*}}, %struct.s56_2* byval align 4 %{{[^ ]*}},
 // CHECK: <4 x i32> %{{[^ ]*}}, %struct.s56_3* byval align 16 %{{[^ ]*}},
 // CHECK: <2 x double> %{{[^ ]*}}, %struct.s56_4* byval align 16 %{{[^ ]*}},
@@ -324,3 +324,21 @@ void f64(struct s64 x) {}
 // CHECK: define float @f65()
 struct s65 { signed char a[0]; float b; };
 struct s65 f65() { return (struct s65){{},2}; }
+
+// CHECK: define <2 x i64> @f66
+// CHECK: ptrtoint
+// CHECK: and {{.*}}, -16
+// CHECK: inttoptr
+typedef int T66 __attribute((vector_size(16)));
+T66 f66(int i, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, i);
+  T66 v = __builtin_va_arg(ap, T66);
+  __builtin_va_end(ap);
+  return v;
+}
+
+// PR14453
+struct s67 { _Complex unsigned short int a; };
+void f67(struct s67 x) {}
+// CHECK: define void @f67(%struct.s67* byval align 4 %x)

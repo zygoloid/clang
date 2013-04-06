@@ -3,17 +3,17 @@
 // rdar://8843524
 
 struct A {
-    id x; // expected-error {{ARC forbids Objective-C objects in structs or unions}}
+    id x; // expected-error {{ARC forbids Objective-C objects in struct}}
 };
 
 union u {
-    id u; // expected-error {{ARC forbids Objective-C objects in structs or unions}}
+    id u; // expected-error {{ARC forbids Objective-C objects in union}}
 };
 
 @interface I {
    struct A a; 
    struct B {
-    id y[10][20]; // expected-error {{ARC forbids Objective-C objects in structs or unions}}
+    id y[10][20]; // expected-error {{ARC forbids Objective-C objects in struct}}
     id z;
    } b;
 
@@ -23,7 +23,7 @@ union u {
 
 // rdar://10260525
 struct r10260525 {
-  id (^block) (); // expected-error {{ARC forbids blocks in structs or unions}}
+  id (^block) (); // expected-error {{ARC forbids blocks in struct}}
 };
 
 struct S { 
@@ -85,6 +85,8 @@ void func()
 - (id)ns_non __attribute((ns_returns_not_retained)); // expected-error {{overriding method has mismatched ns_returns_not_retained attributes}}
 - (id)not_ret:(id) b __attribute((ns_returns_retained)); // expected-error {{overriding method has mismatched ns_returns_retained attributes}}
 - (id)both__returns_not_retained:(id) b __attribute((ns_returns_not_retained));
+// rdar://12173491
+@property (copy, nonatomic) __attribute__((ns_returns_retained)) id (^fblock)(void);
 @end
 
 // Test that we give a good diagnostic here that mentions the missing

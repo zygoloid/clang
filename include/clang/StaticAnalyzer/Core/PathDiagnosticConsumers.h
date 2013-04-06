@@ -15,32 +15,32 @@
 #define LLVM_CLANG_GR_PATH_DIAGNOSTIC_CLIENTS_H
 
 #include <string>
+#include <vector>
 
 namespace clang {
 
+class AnalyzerOptions;
 class Preprocessor;
 
 namespace ento {
 
 class PathDiagnosticConsumer;
+typedef std::vector<PathDiagnosticConsumer*> PathDiagnosticConsumers;
 
-PathDiagnosticConsumer*
-createHTMLDiagnosticConsumer(const std::string& prefix, const Preprocessor &PP);
+#define CREATE_CONSUMER(NAME)\
+void create ## NAME ## DiagnosticConsumer(AnalyzerOptions &AnalyzerOpts,\
+                                          PathDiagnosticConsumers &C,\
+                                          const std::string& prefix,\
+                                          const Preprocessor &PP);
 
-PathDiagnosticConsumer*
-createPlistDiagnosticConsumer(const std::string& prefix, const Preprocessor &PP,
-                              PathDiagnosticConsumer *SubPD = 0);
+CREATE_CONSUMER(HTML)
+CREATE_CONSUMER(Plist)
+CREATE_CONSUMER(PlistMultiFile)
+CREATE_CONSUMER(TextPath)
 
-PathDiagnosticConsumer*
-createPlistMultiFileDiagnosticConsumer(const std::string& prefix,
-                                       const Preprocessor &PP);
+#undef CREATE_CONSUMER
 
-PathDiagnosticConsumer*
-createTextPathDiagnosticConsumer(const std::string& prefix,
-                                 const Preprocessor &PP);
-
-} // end GR namespace
-
-} // end clang namespace
+} // end 'ento' namespace
+} // end 'clang' namespace
 
 #endif

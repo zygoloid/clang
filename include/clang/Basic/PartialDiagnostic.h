@@ -6,10 +6,11 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-//
-//  This file implements a partial diagnostic that can be emitted anwyhere
-//  in a DiagnosticBuilder stream.
-//
+///
+/// \file
+/// \brief Implements a partial diagnostic that can be emitted anwyhere
+/// in a DiagnosticBuilder stream.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_CLANG_PARTIALDIAGNOSTIC_H
@@ -18,6 +19,7 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include <cassert>
 
@@ -37,25 +39,26 @@ public:
     Storage() : NumDiagArgs(0), NumDiagRanges(0) { }
 
     enum {
-        /// MaxArguments - The maximum number of arguments we can hold. We
+        /// \brief The maximum number of arguments we can hold. We
         /// currently only support up to 10 arguments (%0-%9).
+        ///
         /// A single diagnostic with more than that almost certainly has to
         /// be simplified anyway.
         MaxArguments = PartialDiagnostic::MaxArguments
     };
 
-    /// NumDiagArgs - This contains the number of entries in Arguments.
+    /// \brief The number of entries in Arguments.
     unsigned char NumDiagArgs;
 
-    /// NumDiagRanges - This is the number of ranges in the DiagRanges array.
+    /// \brief This is the number of ranges in the DiagRanges array.
     unsigned char NumDiagRanges;
 
-    /// DiagArgumentsKind - This is an array of ArgumentKind::ArgumentKind enum
-    /// values, with one for each argument.  This specifies whether the argument
-    /// is in DiagArgumentsStr or in DiagArguments.
+    /// \brief Specifies for each argument whether it is in DiagArgumentsStr
+    /// or in DiagArguments.
     unsigned char DiagArgumentsKind[MaxArguments];
 
-    /// DiagArgumentsVal - The values for the various substitution positions.
+    /// \brief The values for the various substitution positions.
+    ///
     /// This is used when the argument is not an std::string. The specific value
     /// is mangled into an intptr_t and the interpretation depends on exactly
     /// what sort of argument kind it is.
@@ -65,12 +68,13 @@ public:
     /// string arguments.
     std::string DiagArgumentsStr[MaxArguments];
 
-    /// DiagRanges - The list of ranges added to this diagnostic.  It currently
-    /// only support 10 ranges, could easily be extended if needed.
+    /// \brief The list of ranges added to this diagnostic.
+    ///
+    /// It currently only support 10 ranges, could easily be extended if needed.
     CharSourceRange DiagRanges[10];
 
-    /// FixItHints - If valid, provides a hint with some code
-    /// to insert, remove, or modify at a particular position.
+    /// \brief If valid, provides a hint with some code to insert, remove, or
+    /// modify at a particular position.
     SmallVector<FixItHint, 6>  FixItHints;
   };
 
@@ -114,10 +118,10 @@ private:
   // in the sense that its bits can be safely memcpy'ed and destructed
   // in the new location.
 
-  /// DiagID - The diagnostic ID.
+  /// \brief The diagnostic ID.
   mutable unsigned DiagID;
 
-  /// DiagStorage - Storage for args and ranges.
+  /// \brief Storage for args and ranges.
   mutable Storage *DiagStorage;
 
   /// \brief Allocator used to allocate storage for this diagnostic.
@@ -179,6 +183,12 @@ private:
   }
 
 public:
+  struct NullDiagnostic {};
+  /// \brief Create a null partial diagnostic, which cannot carry a payload,
+  /// and only exists to be swapped with a real partial diagnostic.
+  PartialDiagnostic(NullDiagnostic)
+    : DiagID(0), DiagStorage(0), Allocator(0) { }
+
   PartialDiagnostic(unsigned DiagID, StorageAllocator &Allocator)
     : DiagID(DiagID), DiagStorage(0), Allocator(&Allocator) { }
 
@@ -190,6 +200,14 @@ public:
       *DiagStorage = *Other.DiagStorage;
     }
   }
+
+#if LLVM_HAS_RVALUE_REFERENCES
+  PartialDiagnostic(PartialDiagnostic &&Other)
+    : DiagID(Other.DiagID), DiagStorage(Other.DiagStorage),
+      Allocator(Other.Allocator) {
+    Other.DiagStorage = 0;
+  }
+#endif
 
   PartialDiagnostic(const PartialDiagnostic &Other, Storage *DiagStorage)
     : DiagID(Other.DiagID), DiagStorage(DiagStorage),
@@ -233,8 +251,27 @@ public:
     return *this;
   }
 
+#if LLVM_HAS_RVALUE_REFERENCES
+  PartialDiagnostic &operator=(PartialDiagnostic &&Other) {
+    freeStorage();
+
+    DiagID = Other.DiagID;
+    DiagStorage = Other.DiagStorage;
+    Allocator = Other.Allocator;
+
+    Other.DiagStorage = 0;
+    return *this;
+  }
+#endif
+
   ~PartialDiagnostic() {
     freeStorage();
+  }
+
+  void swap(PartialDiagnostic &PD) {
+    std::swap(DiagID, PD.DiagID);
+    std::swap(DiagStorage, PD.DiagStorage);
+    std::swap(Allocator, PD.Allocator);
   }
 
   unsigned getDiagID() const { return DiagID; }
@@ -281,6 +318,18 @@ public:
     // Add all fix-its.
     for (unsigned i = 0, e = DiagStorage->FixItHints.size(); i != e; ++i)
       DB.AddFixItHint(DiagStorage->FixItHints[i]);
+  }
+
+  void EmitToString(DiagnosticsEngine &Diags,
+                    SmallVectorImpl<char> &Buf) const {
+    // FIXME: It should be possible to render a diagnostic to a string without
+    //        messing with the state of the diagnostics engine.
+    DiagnosticBuilder DB(Diags.Report(getDiagID()));
+    Emit(DB);
+    DB.FlushCounts();
+    Diagnostic(&Diags).FormatDiagnostic(Buf);
+    DB.Clear();
+    Diags.Clear();
   }
 
   /// \brief Clear out this partial diagnostic, giving it a new diagnostic ID

@@ -1,10 +1,15 @@
-// RUN: %clang_cc1 -analyze -analyzer-checker=core,experimental.deadcode.UnreachableCode,experimental.core.CastSize,unix.Malloc -analyzer-store=region -verify %s
+// RUN: %clang_cc1 -analyze -analyzer-checker=core,alpha.deadcode.UnreachableCode,alpha.core.CastSize,unix.Malloc -analyzer-store=region -verify %s
 
 typedef __typeof(sizeof(int)) size_t;
 void *malloc(size_t);
 void free(void *);
 void *realloc(void *ptr, size_t size);
 void *calloc(size_t nmemb, size_t size);
+char *strdup(const char *s);
+
+void checkThatMallocCheckerIsRunning() {
+  malloc(4);
+} // expected-warning{{leak}}
 
 // Test for radar://11110132.
 struct Foo {
@@ -35,3 +40,63 @@ void r11160612_3(CanFreeMemory* p) {
   const_ptr_and_callback_def_param(0, x, 12, p->myFree);
 }
 
+
+namespace PR13751 {
+  class OwningVector {
+    void **storage;
+    size_t length;
+  public:
+    OwningVector();
+    ~OwningVector();
+    void push_back(void *Item) {
+      storage[length++] = Item;
+    }
+  };
+
+  void testDestructors() {
+    OwningVector v;
+    v.push_back(malloc(4));
+    // no leak warning; freed in destructor
+  }
+}
+
+struct X { void *a; };
+
+struct X get() {
+  struct X result;
+  result.a = malloc(4);
+  return result; // no-warning
+}
+
+// Ensure that regions accessible through a LazyCompoundVal trigger region escape.
+// Malloc checker used to report leaks for the following two test cases.
+struct Property {
+  char* getterName;
+  Property(char* n)
+  : getterName(n) {}
+
+};
+void append(Property x);
+
+void appendWrapper(char *getterName) {
+  append(Property(getterName));
+}
+void foo(const char* name) {
+  char* getterName = strdup(name);
+  appendWrapper(getterName); // no-warning
+}
+
+struct NestedProperty {
+  Property prop;
+  NestedProperty(Property p)
+  : prop(p) {}
+};
+void appendNested(NestedProperty x);
+
+void appendWrapperNested(char *getterName) {
+  appendNested(NestedProperty(Property(getterName)));
+}
+void fooNested(const char* name) {
+  char* getterName = strdup(name);
+  appendWrapperNested(getterName); // no-warning
+}

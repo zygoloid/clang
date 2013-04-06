@@ -1,4 +1,4 @@
-// RUN: %clang -target mips64el-unknown-linux -ccc-clang-archs mips64el -O3 -S -mabi=n64 -o - -emit-llvm %s | FileCheck %s
+// RUN: %clang -target mips64el-unknown-linux -O3 -S -mabi=n64 -o - -emit-llvm %s | FileCheck %s
 
 class B0 {
   double d;
@@ -39,7 +39,7 @@ void foo3(D2 a0) {
   gd2 = a0;
 }
 
-// CHECK: define void @_Z4foo42D0(%class.D0* nocapture byval %a0)
+// CHECK: define void @_Z4foo42D0(i64 %a0.coerce0, i64 %a0.coerce1)
 void foo4(D0 a0) {
   gd0 = a0;
 }

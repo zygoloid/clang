@@ -48,20 +48,25 @@ static Attr *handleFallThroughAttr(Sema &S, Stmt *St, const AttributeList &A,
 static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const AttributeList &A,
                                   SourceRange Range) {
   switch (A.getKind()) {
-  case AttributeList::AT_clang___fallthrough:
+  case AttributeList::UnknownAttribute:
+    S.Diag(A.getLoc(), A.isDeclspecAttribute() ?
+           diag::warn_unhandled_ms_attribute_ignored :
+           diag::warn_unknown_attribute_ignored) << A.getName();
+    return 0;
+  case AttributeList::AT_FallThrough:
     return handleFallThroughAttr(S, St, A, Range);
   default:
-    // if we're here, then we parsed an attribute, but didn't recognize it as a
-    // statement attribute => it is declaration attribute
-    S.Diag(A.getRange().getBegin(), diag::warn_attribute_invalid_on_stmt)
-        << A.getName()->getName() << St->getLocStart();
+    // if we're here, then we parsed a known attribute, but didn't recognize
+    // it as a statement attribute => it is declaration attribute
+    S.Diag(A.getRange().getBegin(), diag::err_attribute_invalid_on_stmt)
+        << A.getName() << St->getLocStart();
     return 0;
   }
 }
 
 StmtResult Sema::ProcessStmtAttributes(Stmt *S, AttributeList *AttrList,
                                        SourceRange Range) {
-  AttrVec Attrs;
+  SmallVector<const Attr*, 8> Attrs;
   for (const AttributeList* l = AttrList; l; l = l->getNext()) {
     if (Attr *a = ProcessStmtAttribute(*this, S, *l, Range))
       Attrs.push_back(a);

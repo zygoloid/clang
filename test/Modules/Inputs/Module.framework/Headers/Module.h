@@ -1,4 +1,8 @@
-// expected-warning{{umbrella header}}
+// expected-warning 0-1 {{umbrella header}}
+
+// FIXME: The "umbrella header" warning should be moved to a separate test.
+// This "0-1" is only here because the warning is only emitted when the
+// module is (otherwise) successfully included.
 
 #ifndef MODULE_H
 #define MODULE_H
@@ -18,5 +22,7 @@ const char *getModuleVersion(void);
 
 #include <Module/Sub.h>
 #include <Module/Buried/Treasure.h>
+
+__asm("foo");
 
 #endif // MODULE_H

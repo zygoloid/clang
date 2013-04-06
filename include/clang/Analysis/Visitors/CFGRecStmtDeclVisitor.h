@@ -17,10 +17,10 @@
 #ifndef LLVM_CLANG_ANALYSIS_CFG_REC_STMT_DECL_VISITOR_H
 #define LLVM_CLANG_ANALYSIS_CFG_REC_STMT_DECL_VISITOR_H
 
-#include "clang/Analysis/Visitors/CFGRecStmtVisitor.h"
 #include "clang/AST/Decl.h"
-#include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/DeclObjC.h"
+#include "clang/Analysis/Visitors/CFGRecStmtVisitor.h"
 
 #define DISPATCH_CASE(CLASS)                                  \
 case Decl::CLASS:                                             \
@@ -63,12 +63,14 @@ public:
         DISPATCH_CASE(ImplicitParam)
         DISPATCH_CASE(EnumConstant)
         DISPATCH_CASE(Typedef)
+        DISPATCH_CASE(TypeAlias)
         DISPATCH_CASE(Record)    // FIXME: Refine.  VisitStructDecl?
         DISPATCH_CASE(CXXRecord)
         DISPATCH_CASE(Enum)
         DISPATCH_CASE(Field)
         DISPATCH_CASE(UsingDirective)
         DISPATCH_CASE(Using)
+        DISPATCH_CASE(NamespaceAlias)
       default:
         llvm_unreachable("Subtype of ScopedDecl not handled.");
     }
@@ -81,6 +83,7 @@ public:
   DEFAULT_DISPATCH(ImplicitParam)
   DEFAULT_DISPATCH(EnumConstant)
   DEFAULT_DISPATCH(Typedef)
+  DEFAULT_DISPATCH(TypeAlias)
   DEFAULT_DISPATCH(Record)
   DEFAULT_DISPATCH(Enum)
   DEFAULT_DISPATCH(Field)
@@ -90,6 +93,7 @@ public:
   DEFAULT_DISPATCH(ObjCCategory)
   DEFAULT_DISPATCH(UsingDirective)
   DEFAULT_DISPATCH(Using)
+  DEFAULT_DISPATCH(NamespaceAlias)
 
   void VisitCXXRecordDecl(CXXRecordDecl *D) {
     static_cast<ImplClass*>(this)->VisitRecordDecl(D);

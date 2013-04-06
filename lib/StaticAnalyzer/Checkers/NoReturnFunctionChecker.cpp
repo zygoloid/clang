@@ -13,10 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "ClangSACheckers.h"
+#include "clang/AST/Attr.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/ObjCMessage.h"
 #include "llvm/ADT/StringSwitch.h"
 #include <cstdarg>
 
@@ -29,7 +30,7 @@ class NoReturnFunctionChecker : public Checker< check::PostStmt<CallExpr>,
                                                 check::PostObjCMessage > {
 public:
   void checkPostStmt(const CallExpr *CE, CheckerContext &C) const;
-  void checkPostObjCMessage(const ObjCMessage &msg, CheckerContext &C) const;
+  void checkPostObjCMessage(const ObjCMethodCall &msg, CheckerContext &C) const;
 };
 
 }
@@ -47,7 +48,7 @@ void NoReturnFunctionChecker::checkPostStmt(const CallExpr *CE,
     if (!FD)
       return;
 
-    if (FD->getAttr<AnalyzerNoReturnAttr>())
+    if (FD->getAttr<AnalyzerNoReturnAttr>() || FD->isNoReturn())
       BuildSinks = true;
     else if (const IdentifierInfo *II = FD->getIdentifier()) {
       // HACK: Some functions are not marked noreturn, and don't return.
@@ -98,8 +99,17 @@ static bool END_WITH_NULL isMultiArgSelector(const Selector *Sel, ...) {
   return (Arg == NULL);
 }
 
-void NoReturnFunctionChecker::checkPostObjCMessage(const ObjCMessage &Msg,
+void NoReturnFunctionChecker::checkPostObjCMessage(const ObjCMethodCall &Msg,
                                                    CheckerContext &C) const {
+  // Check if the method is annotated with analyzer_noreturn.
+  if (const ObjCMethodDecl *MD = Msg.getDecl()) {
+    MD = MD->getCanonicalDecl();
+    if (MD->hasAttr<AnalyzerNoReturnAttr>()) {
+      C.generateSink();
+      return;
+    }
+  }
+
   // HACK: This entire check is to handle two messages in the Cocoa frameworks:
   // -[NSAssertionHandler
   //    handleFailureInMethod:object:file:lineNumber:description:]

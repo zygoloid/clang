@@ -8,17 +8,19 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Basic/SourceManager.h"
-#include "clang/Basic/FileManager.h"
 #include "clang/Basic/Diagnostic.h"
+#include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/Basic/TargetOptions.h"
 #include "clang/Basic/TargetInfo.h"
-#include "clang/Lex/ModuleLoader.h"
+#include "clang/Basic/TargetOptions.h"
 #include "clang/Lex/HeaderSearch.h"
+#include "clang/Lex/HeaderSearchOptions.h"
+#include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/PreprocessorOptions.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Config/config.h"
-
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -32,10 +34,11 @@ protected:
   SourceManagerTest()
     : FileMgr(FileMgrOpts),
       DiagID(new DiagnosticIDs()),
-      Diags(DiagID, new IgnoringDiagConsumer()),
-      SourceMgr(Diags, FileMgr) {
-    TargetOpts.Triple = "x86_64-apple-darwin11.1.0";
-    Target = TargetInfo::CreateTargetInfo(Diags, TargetOpts);
+      Diags(DiagID, new DiagnosticOptions, new IgnoringDiagConsumer()),
+      SourceMgr(Diags, FileMgr),
+      TargetOpts(new TargetOptions) {
+    TargetOpts->Triple = "x86_64-apple-darwin11.1.0";
+    Target = TargetInfo::CreateTargetInfo(Diags, &*TargetOpts);
   }
 
   FileSystemOptions FileMgrOpts;
@@ -44,16 +47,22 @@ protected:
   DiagnosticsEngine Diags;
   SourceManager SourceMgr;
   LangOptions LangOpts;
-  TargetOptions TargetOpts;
+  IntrusiveRefCntPtr<TargetOptions> TargetOpts;
   IntrusiveRefCntPtr<TargetInfo> Target;
 };
 
 class VoidModuleLoader : public ModuleLoader {
-  virtual Module *loadModule(SourceLocation ImportLoc, ModuleIdPath Path,
-                             Module::NameVisibilityKind Visibility,
-                             bool IsInclusionDirective) {
-    return 0;
+  virtual ModuleLoadResult loadModule(SourceLocation ImportLoc, 
+                                      ModuleIdPath Path,
+                                      Module::NameVisibilityKind Visibility,
+                                      bool IsInclusionDirective) {
+    return ModuleLoadResult();
   }
+
+  virtual void makeModuleVisible(Module *Mod,
+                                 Module::NameVisibilityKind Visibility,
+                                 SourceLocation ImportLoc,
+                                 bool Complain) { }
 };
 
 TEST_F(SourceManagerTest, isBeforeInTranslationUnit) {
@@ -64,9 +73,9 @@ TEST_F(SourceManagerTest, isBeforeInTranslationUnit) {
   FileID mainFileID = SourceMgr.createMainFileIDForMemBuffer(buf);
 
   VoidModuleLoader ModLoader;
-  HeaderSearch HeaderInfo(FileMgr, Diags, LangOpts, &*Target);
-  Preprocessor PP(Diags, LangOpts,
-                  Target.getPtr(),
+  HeaderSearch HeaderInfo(new HeaderSearchOptions, FileMgr, Diags, LangOpts, 
+                          &*Target);
+  Preprocessor PP(new PreprocessorOptions(), Diags, LangOpts, Target.getPtr(),
                   SourceMgr, HeaderInfo, ModLoader,
                   /*IILookup =*/ 0,
                   /*OwnsHeaderSearch =*/false,
@@ -107,6 +116,54 @@ TEST_F(SourceManagerTest, isBeforeInTranslationUnit) {
   EXPECT_TRUE(SourceMgr.isBeforeInTranslationUnit(idLoc, macroExpEndLoc));
 }
 
+TEST_F(SourceManagerTest, getColumnNumber) {
+  const char *Source =
+    "int x;\n"
+    "int y;";
+
+  MemoryBuffer *Buf = MemoryBuffer::getMemBuffer(Source);
+  FileID MainFileID = SourceMgr.createMainFileIDForMemBuffer(Buf);
+
+  bool Invalid;
+
+  Invalid = false;
+  EXPECT_EQ(1U, SourceMgr.getColumnNumber(MainFileID, 0, &Invalid));
+  EXPECT_TRUE(!Invalid);
+
+  Invalid = false;
+  EXPECT_EQ(5U, SourceMgr.getColumnNumber(MainFileID, 4, &Invalid));
+  EXPECT_TRUE(!Invalid);
+
+  Invalid = false;
+  EXPECT_EQ(1U, SourceMgr.getColumnNumber(MainFileID, 7, &Invalid));
+  EXPECT_TRUE(!Invalid);
+
+  Invalid = false;
+  EXPECT_EQ(5U, SourceMgr.getColumnNumber(MainFileID, 11, &Invalid));
+  EXPECT_TRUE(!Invalid);
+
+  Invalid = false;
+  EXPECT_EQ(7U, SourceMgr.getColumnNumber(MainFileID, strlen(Source),
+                                         &Invalid));
+  EXPECT_TRUE(!Invalid);
+
+  Invalid = false;
+  SourceMgr.getColumnNumber(MainFileID, strlen(Source)+1, &Invalid);
+  EXPECT_TRUE(Invalid);
+
+  // Test invalid files
+  Invalid = false;
+  SourceMgr.getColumnNumber(FileID(), 0, &Invalid);
+  EXPECT_TRUE(Invalid);
+
+  Invalid = false;
+  SourceMgr.getColumnNumber(FileID(), 1, &Invalid);
+  EXPECT_TRUE(Invalid);
+
+  // Test with no invalid flag.
+  EXPECT_EQ(1U, SourceMgr.getColumnNumber(MainFileID, 0, NULL));
+}
+
 #if defined(LLVM_ON_UNIX)
 
 TEST_F(SourceManagerTest, getMacroArgExpandedLocation) {
@@ -131,9 +188,9 @@ TEST_F(SourceManagerTest, getMacroArgExpandedLocation) {
   SourceMgr.overrideFileContents(headerFile, headerBuf);
 
   VoidModuleLoader ModLoader;
-  HeaderSearch HeaderInfo(FileMgr, Diags, LangOpts, &*Target);
-  Preprocessor PP(Diags, LangOpts,
-                  Target.getPtr(),
+  HeaderSearch HeaderInfo(new HeaderSearchOptions, FileMgr, Diags, LangOpts, 
+                          &*Target);
+  Preprocessor PP(new PreprocessorOptions(), Diags, LangOpts, Target.getPtr(),
                   SourceMgr, HeaderInfo, ModLoader,
                   /*IILookup =*/ 0,
                   /*OwnsHeaderSearch =*/false,
@@ -193,12 +250,13 @@ class MacroTracker : public PPCallbacks {
 public:
   explicit MacroTracker(std::vector<MacroAction> &Macros) : Macros(Macros) { }
   
-  virtual void MacroDefined(const Token &MacroNameTok, const MacroInfo *MI) {
-    Macros.push_back(MacroAction(MI->getDefinitionLoc(),
+  virtual void MacroDefined(const Token &MacroNameTok,
+                            const MacroDirective *MD) {
+    Macros.push_back(MacroAction(MD->getLocation(),
                                  MacroNameTok.getIdentifierInfo()->getName(),
                                  true));
   }
-  virtual void MacroExpands(const Token &MacroNameTok, const MacroInfo* MI,
+  virtual void MacroExpands(const Token &MacroNameTok, const MacroDirective *MD,
                             SourceRange Range) {
     Macros.push_back(MacroAction(MacroNameTok.getLocation(),
                                  MacroNameTok.getIdentifierInfo()->getName(),
@@ -228,9 +286,9 @@ TEST_F(SourceManagerTest, isBeforeInTranslationUnitWithMacroInInclude) {
   SourceMgr.overrideFileContents(headerFile, headerBuf);
 
   VoidModuleLoader ModLoader;
-  HeaderSearch HeaderInfo(FileMgr, Diags, LangOpts, &*Target);
-  Preprocessor PP(Diags, LangOpts,
-                  Target.getPtr(),
+  HeaderSearch HeaderInfo(new HeaderSearchOptions, FileMgr, Diags, LangOpts, 
+                          &*Target);
+  Preprocessor PP(new PreprocessorOptions(), Diags, LangOpts, Target.getPtr(),
                   SourceMgr, HeaderInfo, ModLoader,
                   /*IILookup =*/ 0,
                   /*OwnsHeaderSearch =*/false,

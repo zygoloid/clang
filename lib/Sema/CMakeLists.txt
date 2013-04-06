@@ -1,9 +1,8 @@
-set(LLVM_USED_LIBS
-  clangAST
-  clangAnalysis
-  clangBasic
-  clangEdit
-  clangLex
+set(LLVM_LINK_COMPONENTS
+  ${LLVM_TARGETS_TO_BUILD}
+  asmparser
+  support
+  mc
   )
 
 add_clang_library(clangSema
@@ -14,7 +13,9 @@ add_clang_library(clangSema
   DelayedDiagnostic.cpp
   IdentifierResolver.cpp
   JumpDiagnostics.cpp
+  MultiplexExternalSemaSource.cpp
   Scope.cpp
+  ScopeInfo.cpp
   Sema.cpp
   SemaAccess.cpp
   SemaAttr.cpp
@@ -37,9 +38,11 @@ add_clang_library(clangSema
   SemaLambda.cpp
   SemaLookup.cpp
   SemaObjCProperty.cpp
+  SemaOpenMP.cpp
   SemaOverload.cpp
   SemaPseudoObject.cpp
   SemaStmt.cpp
+  SemaStmtAsm.cpp
   SemaStmtAttr.cpp
   SemaTemplate.cpp
   SemaTemplateDeduction.cpp
@@ -50,9 +53,28 @@ add_clang_library(clangSema
   TargetAttributesSema.cpp
   )
 
-add_dependencies(clangSema ClangARMNeon ClangAttrClasses ClangAttrList 
-                 ClangDiagnosticSema ClangDeclNodes ClangStmtNodes 
-                 ClangAttrTemplateInstantiate ClangAttrParsedAttrList 
-				 ClangAttrParsedAttrKinds)
+add_dependencies(clangSema
+  ClangARMNeon
+  ClangAttrClasses
+  ClangAttrList
+  ClangAttrParsedAttrList
+  ClangAttrParsedAttrKinds
+  ClangAttrSpellingListIndex
+  ClangAttrTemplateInstantiate
+  ClangCommentNodes
+  ClangDeclNodes
+  ClangDiagnosticAST
+  ClangDiagnosticComment
+  ClangDiagnosticCommon
+  ClangDiagnosticParse
+  ClangDiagnosticSema
+  ClangStmtNodes
+  )
 
-
+target_link_libraries(clangSema
+  clangAST
+  clangAnalysis
+  clangBasic
+  clangEdit
+  clangLex
+  )

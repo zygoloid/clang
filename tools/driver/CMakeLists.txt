@@ -1,29 +1,9 @@
-set( LLVM_USED_LIBS
-  clangFrontendTool
-  clangAST
-  clangAnalysis
-  clangBasic
-  clangCodeGen
-  clangDriver
-  clangEdit
-  clangFrontend
-  clangLex
-  clangParse
-  clangEdit
-  clangARCMigrate
-  clangRewrite
-  clangSema
-  clangSerialization
-  clangStaticAnalyzerFrontend
-  clangStaticAnalyzerCheckers
-  clangStaticAnalyzerCore
-  )
-
 set( LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
   asmparser
   bitreader
   bitwriter
+  irreader
   codegen
   instrumentation
   ipo
@@ -37,7 +17,32 @@ add_clang_executable(clang
   cc1as_main.cpp
   )
 
+target_link_libraries(clang
+  clangFrontendTool
+  clangAST
+  clangAnalysis
+  clangBasic
+  clangCodeGen
+  clangDriver
+  clangEdit
+  clangFrontend
+  clangLex
+  clangParse
+  clangEdit
+  clangARCMigrate
+  clangRewriteCore
+  clangRewriteFrontend
+  clangSema
+  clangSerialization
+  clangStaticAnalyzerFrontend
+  clangStaticAnalyzerCheckers
+  clangStaticAnalyzerCore
+  )
+
 set_target_properties(clang PROPERTIES VERSION ${CLANG_EXECUTABLE_VERSION})
+set_target_properties(clang PROPERTIES ENABLE_EXPORTS 1)
+
+add_dependencies(clang clang-headers)
 
 if(UNIX)
   set(CLANGXX_LINK_OR_COPY create_symlink)

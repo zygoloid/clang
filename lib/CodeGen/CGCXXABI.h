@@ -15,9 +15,8 @@
 #ifndef CLANG_CODEGEN_CXXABI_H
 #define CLANG_CODEGEN_CXXABI_H
 
-#include "clang/Basic/LLVM.h"
-
 #include "CodeGenFunction.h"
+#include "clang/Basic/LLVM.h"
 
 namespace llvm {
   class Constant;
@@ -38,7 +37,7 @@ namespace CodeGen {
   class CodeGenFunction;
   class CodeGenModule;
 
-/// Implements C++ ABI-specific code generation functions.
+/// \brief Implements C++ ABI-specific code generation functions.
 class CGCXXABI {
 protected:
   CodeGenModule &CGM;
@@ -55,11 +54,26 @@ protected:
     return CGF.CXXABIThisValue;
   }
 
+  /// Issue a diagnostic about unsupported features in the ABI.
+  void ErrorUnsupportedABI(CodeGenFunction &CGF, StringRef S);
+
+  /// Get a null value for unsupported member pointers.
+  llvm::Constant *GetBogusMemberPointer(QualType T);
+
+  // FIXME: Every place that calls getVTT{Decl,Value} is something
+  // that needs to be abstracted properly.
   ImplicitParamDecl *&getVTTDecl(CodeGenFunction &CGF) {
-    return CGF.CXXVTTDecl;
+    return CGF.CXXStructorImplicitParamDecl;
   }
   llvm::Value *&getVTTValue(CodeGenFunction &CGF) {
-    return CGF.CXXVTTValue;
+    return CGF.CXXStructorImplicitParamValue;
+  }
+
+  ImplicitParamDecl *&getStructorImplicitParamDecl(CodeGenFunction &CGF) {
+    return CGF.CXXStructorImplicitParamDecl;
+  }
+  llvm::Value *&getStructorImplicitParamValue(CodeGenFunction &CGF) {
+    return CGF.CXXStructorImplicitParamValue;
   }
 
   /// Build a parameter variable suitable for 'this'.
@@ -82,6 +96,10 @@ public:
   MangleContext &getMangleContext() {
     return *MangleCtx;
   }
+
+  /// Returns true if the given instance method is one of the
+  /// kinds that the ABI says returns 'this'.
+  virtual bool HasThisReturn(GlobalDecl GD) const { return false; }
 
   /// Find the LLVM type used to represent the given member pointer
   /// type.
@@ -154,6 +172,15 @@ protected:
   llvm::Constant *getMemberPointerAdjustment(const CastExpr *E);
 
 public:
+  /// Adjust the given non-null pointer to an object of polymorphic
+  /// type to point to the complete object.
+  ///
+  /// The IR type of the result should be a pointer but is otherwise
+  /// irrelevant.
+  virtual llvm::Value *adjustToCompleteObject(CodeGenFunction &CGF,
+                                              llvm::Value *ptr,
+                                              QualType type) = 0;
+
   /// Build the signature of the given constructor variant by adding
   /// any required parameters.  For convenience, ResTy has been
   /// initialized to 'void', and ArgTys has been initialized with the
@@ -167,6 +194,8 @@ public:
                                          CXXCtorType T,
                                          CanQualType &ResTy,
                                SmallVectorImpl<CanQualType> &ArgTys) = 0;
+
+  virtual llvm::BasicBlock *EmitCtorCompleteObjectHandler(CodeGenFunction &CGF);
 
   /// Build the signature of the given destructor variant by adding
   /// any required parameters.  For convenience, ResTy has been
@@ -190,21 +219,43 @@ public:
   /// Emit the ABI-specific prolog for the function.
   virtual void EmitInstanceFunctionProlog(CodeGenFunction &CGF) = 0;
 
+  /// Emit the constructor call. Return the function that is called.
+  virtual llvm::Value *EmitConstructorCall(CodeGenFunction &CGF,
+                                   const CXXConstructorDecl *D,
+                                   CXXCtorType Type, bool ForVirtualBase,
+                                   bool Delegating,
+                                   llvm::Value *This,
+                                   CallExpr::const_arg_iterator ArgBeg,
+                                   CallExpr::const_arg_iterator ArgEnd) = 0;
+
+  /// Emit the ABI-specific virtual destructor call.
+  virtual RValue EmitVirtualDestructorCall(CodeGenFunction &CGF,
+                                           const CXXDestructorDecl *Dtor,
+                                           CXXDtorType DtorType,
+                                           SourceLocation CallLoc,
+                                           ReturnValueSlot ReturnValue,
+                                           llvm::Value *This) = 0;
+
   virtual void EmitReturnFromThunk(CodeGenFunction &CGF,
                                    RValue RV, QualType ResultType);
+
+  /// Gets the pure virtual member call function.
+  virtual StringRef GetPureVirtualCallName() = 0;
+
+  /// Gets the deleted virtual member call name.
+  virtual StringRef GetDeletedVirtualCallName() = 0;
 
   /**************************** Array cookies ******************************/
 
   /// Returns the extra size required in order to store the array
-  /// cookie for the given type.  May return 0 to indicate that no
+  /// cookie for the given new-expression.  May return 0 to indicate that no
   /// array cookie is required.
   ///
   /// Several cases are filtered out before this method is called:
   ///   - non-array allocations never need a cookie
-  ///   - calls to ::operator new(size_t, void*) never need a cookie
+  ///   - calls to \::operator new(size_t, void*) never need a cookie
   ///
-  /// \param ElementType - the allocated type of the expression,
-  ///   i.e. the pointee type of the expression result type
+  /// \param expr - the new-expression being allocated.
   virtual CharUnits GetArrayCookieSize(const CXXNewExpr *expr);
 
   /// Initialize the array cookie for the given allocation.
@@ -251,7 +302,9 @@ protected:
   ///
   /// \param ptr - a pointer to the allocation made for an array, as a char*
   /// \param cookieSize - the computed cookie size of an array
+  ///
   /// Other parameters are as above.
+  ///
   /// \return a size_t
   virtual llvm::Value *readArrayCookieImpl(CodeGenFunction &IGF,
                                            llvm::Value *ptr,
@@ -281,9 +334,12 @@ public:
                                   llvm::Constant *addr);
 };
 
-/// Creates an instance of a C++ ABI class.
-CGCXXABI *CreateARMCXXABI(CodeGenModule &CGM);
+// Create an instance of a C++ ABI class:
+
+/// Creates an Itanium-family ABI.
 CGCXXABI *CreateItaniumCXXABI(CodeGenModule &CGM);
+
+/// Creates a Microsoft-family ABI.
 CGCXXABI *CreateMicrosoftCXXABI(CodeGenModule &CGM);
 
 }

@@ -12,10 +12,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/VTableBuilder.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdio>
 
@@ -164,7 +166,7 @@ FinalOverriders::FinalOverriders(const CXXRecordDecl *MostDerivedClass,
                      SubobjectOffsets, SubobjectLayoutClassOffsets, 
                      SubobjectCounts);
 
-  // Get the the final overriders.
+  // Get the final overriders.
   CXXFinalOverriderMap FinalOverriders;
   MostDerivedClass->getFinalOverriders(FinalOverriders);
 
@@ -255,11 +257,9 @@ static BaseOffset ComputeBaseOffset(ASTContext &Context,
                                     const CXXRecordDecl *DerivedRD) {
   CXXBasePaths Paths(/*FindAmbiguities=*/false,
                      /*RecordPaths=*/true, /*DetectVirtual=*/false);
-  
-  if (!const_cast<CXXRecordDecl *>(DerivedRD)->
-      isDerivedFrom(const_cast<CXXRecordDecl *>(BaseRD), Paths)) {
+
+  if (!DerivedRD->isDerivedFrom(BaseRD, Paths))
     llvm_unreachable("Class must be derived from the passed in base class!");
-  }
 
   return ComputeBaseOffset(Context, DerivedRD, Paths.front());
 }
@@ -409,7 +409,7 @@ void FinalOverriders::dump(raw_ostream &Out, BaseSubobject Base,
   // Now dump the overriders for this base subobject.
   for (CXXRecordDecl::method_iterator I = RD->method_begin(), 
        E = RD->method_end(); I != E; ++I) {
-    const CXXMethodDecl *MD = &*I;
+    const CXXMethodDecl *MD = *I;
 
     if (!MD->isVirtual())
       continue;
@@ -630,7 +630,7 @@ VCallAndVBaseOffsetBuilder::AddVCallAndVBaseOffsets(BaseSubobject Base,
     
     // Get the base offset of the primary base.
     if (PrimaryBaseIsVirtual) {
-      assert(Layout.getVBaseClassOffsetInBits(PrimaryBase) == 0 &&
+      assert(Layout.getVBaseClassOffset(PrimaryBase).isZero() &&
              "Primary vbase should have a zero offset!");
       
       const ASTRecordLayout &MostDerivedClassLayout =
@@ -639,7 +639,7 @@ VCallAndVBaseOffsetBuilder::AddVCallAndVBaseOffsets(BaseSubobject Base,
       PrimaryBaseOffset = 
         MostDerivedClassLayout.getVBaseClassOffset(PrimaryBase);
     } else {
-      assert(Layout.getBaseClassOffsetInBits(PrimaryBase) == 0 &&
+      assert(Layout.getBaseClassOffset(PrimaryBase).isZero() &&
              "Primary base should have a zero offset!");
 
       PrimaryBaseOffset = Base.getBaseOffset();
@@ -682,7 +682,7 @@ void VCallAndVBaseOffsetBuilder::AddVCallOffsets(BaseSubobject Base,
   // primary base will have its vcall and vbase offsets emitted already.
   if (PrimaryBase && !Layout.isPrimaryBaseVirtual()) {
     // Get the base offset of the primary base.
-    assert(Layout.getBaseClassOffsetInBits(PrimaryBase) == 0 &&
+    assert(Layout.getBaseClassOffset(PrimaryBase).isZero() &&
            "Primary base should have a zero offset!");
 
     AddVCallOffsets(BaseSubobject(PrimaryBase, Base.getBaseOffset()),
@@ -692,7 +692,7 @@ void VCallAndVBaseOffsetBuilder::AddVCallOffsets(BaseSubobject Base,
   // Add the vcall offsets.
   for (CXXRecordDecl::method_iterator I = RD->method_begin(),
        E = RD->method_end(); I != E; ++I) {
-    const CXXMethodDecl *MD = &*I;
+    const CXXMethodDecl *MD = *I;
     
     if (!MD->isVirtual())
       continue;
@@ -1000,6 +1000,10 @@ public:
       dumpLayout(llvm::errs());
   }
 
+  bool isMicrosoftABI() const {
+    return VTables.isMicrosoftABI();
+  }
+
   uint64_t getNumThunks() const {
     return Thunks.size();
   }
@@ -1156,6 +1160,8 @@ void VTableBuilder::ComputeThisAdjustments() {
       break;
     case VTableComponent::CK_DeletingDtorPointer:
       // We've already added the thunk when we saw the complete dtor pointer.
+      // FIXME: check how this works in the Microsoft ABI
+      // while working on the multiple inheritance patch.
       continue;
     }
 
@@ -1196,10 +1202,8 @@ VTableBuilder::ComputeThisAdjustmentBaseOffset(BaseSubobject Base,
   CXXBasePaths Paths(/*FindAmbiguities=*/true,
                      /*RecordPaths=*/true, /*DetectVirtual=*/true);
 
-  if (!const_cast<CXXRecordDecl *>(DerivedRD)->
-      isDerivedFrom(const_cast<CXXRecordDecl *>(BaseRD), Paths)) {
+  if (!DerivedRD->isDerivedFrom(BaseRD, Paths))
     llvm_unreachable("Class must be derived from the passed in base class!");
-  }
 
   // We have to go through all the paths, and see which one leads us to the
   // right base subobject.
@@ -1294,9 +1298,15 @@ VTableBuilder::AddMethod(const CXXMethodDecl *MD,
     assert(ReturnAdjustment.isEmpty() && 
            "Destructor can't have return adjustment!");
 
-    // Add both the complete destructor and the deleting destructor.
-    Components.push_back(VTableComponent::MakeCompleteDtor(DD));
-    Components.push_back(VTableComponent::MakeDeletingDtor(DD));
+    // FIXME: Should probably add a layer of abstraction for vtable generation.
+    if (!isMicrosoftABI()) {
+      // Add both the complete destructor and the deleting destructor.
+      Components.push_back(VTableComponent::MakeCompleteDtor(DD));
+      Components.push_back(VTableComponent::MakeDeletingDtor(DD));
+    } else {
+      // Add the scalar deleting destructor.
+      Components.push_back(VTableComponent::MakeDeletingDtor(DD));
+    }
   } else {
     // Add the return adjustment if necessary.
     if (!ReturnAdjustment.isEmpty())
@@ -1370,7 +1380,7 @@ VTableBuilder::IsOverriderUsed(const CXXMethodDecl *Overrider,
       break;
     
     if (Layout.isPrimaryBaseVirtual()) {
-      assert(Layout.getVBaseClassOffsetInBits(PrimaryBase) == 0 && 
+      assert(Layout.getVBaseClassOffset(PrimaryBase).isZero() &&
              "Primary base should always be at offset 0!");
 
       const ASTRecordLayout &LayoutClassLayout =
@@ -1384,7 +1394,7 @@ VTableBuilder::IsOverriderUsed(const CXXMethodDecl *Overrider,
         break;
       }
     } else {
-      assert(Layout.getBaseClassOffsetInBits(PrimaryBase) == 0 && 
+      assert(Layout.getBaseClassOffset(PrimaryBase).isZero() &&
              "Primary base should always be at offset 0!");
     }
     
@@ -1436,7 +1446,7 @@ VTableBuilder::AddMethods(BaseSubobject Base, CharUnits BaseOffsetInLayoutClass,
     CharUnits PrimaryBaseOffset;
     CharUnits PrimaryBaseOffsetInLayoutClass;
     if (Layout.isPrimaryBaseVirtual()) {
-      assert(Layout.getVBaseClassOffsetInBits(PrimaryBase) == 0 &&
+      assert(Layout.getVBaseClassOffset(PrimaryBase).isZero() &&
              "Primary vbase should have a zero offset!");
       
       const ASTRecordLayout &MostDerivedClassLayout =
@@ -1451,7 +1461,7 @@ VTableBuilder::AddMethods(BaseSubobject Base, CharUnits BaseOffsetInLayoutClass,
       PrimaryBaseOffsetInLayoutClass =
         LayoutClassLayout.getVBaseClassOffset(PrimaryBase);
     } else {
-      assert(Layout.getBaseClassOffsetInBits(PrimaryBase) == 0 &&
+      assert(Layout.getBaseClassOffset(PrimaryBase).isZero() &&
              "Primary base should have a zero offset!");
 
       PrimaryBaseOffset = Base.getBaseOffset();
@@ -1469,7 +1479,7 @@ VTableBuilder::AddMethods(BaseSubobject Base, CharUnits BaseOffsetInLayoutClass,
   // Now go through all virtual member functions and add them.
   for (CXXRecordDecl::method_iterator I = RD->method_begin(),
        E = RD->method_end(); I != E; ++I) {
-    const CXXMethodDecl *MD = &*I;
+    const CXXMethodDecl *MD = *I;
   
     if (!MD->isVirtual())
       continue;
@@ -1611,14 +1621,19 @@ VTableBuilder::LayoutPrimaryAndSecondaryVTables(BaseSubobject Base,
   if (Base.getBase() == MostDerivedClass)
     VBaseOffsetOffsets = Builder.getVBaseOffsetOffsets();
 
-  // Add the offset to top.
-  CharUnits OffsetToTop = MostDerivedClassOffset - OffsetInLayoutClass;
-  Components.push_back(
-    VTableComponent::MakeOffsetToTop(OffsetToTop));
-  
-  // Next, add the RTTI.
-  Components.push_back(VTableComponent::MakeRTTI(MostDerivedClass));
-  
+  // FIXME: Should probably add a layer of abstraction for vtable generation.
+  if (!isMicrosoftABI()) {
+    // Add the offset to top.
+    CharUnits OffsetToTop = MostDerivedClassOffset - OffsetInLayoutClass;
+    Components.push_back(VTableComponent::MakeOffsetToTop(OffsetToTop));
+
+    // Next, add the RTTI.
+    Components.push_back(VTableComponent::MakeRTTI(MostDerivedClass));
+  } else {
+    // FIXME: unclear what to do with RTTI in MS ABI as emitting it anywhere
+    // breaks the vftable layout. Just skip RTTI for now, can't mangle anyway.
+  }
+
   uint64_t AddressPoint = Components.size();
 
   // Now go through all virtual member functions and add them.
@@ -1890,6 +1905,9 @@ void VTableBuilder::dumpLayout(raw_ostream& Out) {
       if (MD->isPure())
         Out << " [pure]";
 
+      if (MD->isDeleted())
+        Out << " [deleted]";
+
       ThunkInfo Thunk = VTableThunks.lookup(I);
       if (!Thunk.isEmpty()) {
         // If this function pointer has a return adjustment, dump it.
@@ -1932,6 +1950,8 @@ void VTableBuilder::dumpLayout(raw_ostream& Out) {
       Out << DD->getQualifiedNameAsString();
       if (IsComplete)
         Out << "() [complete]";
+      else if (isMicrosoftABI())
+        Out << "() [scalar deleting]";
       else
         Out << "() [deleting]";
 
@@ -2105,7 +2125,7 @@ void VTableBuilder::dumpLayout(raw_ostream& Out) {
 
   for (CXXRecordDecl::method_iterator i = MostDerivedClass->method_begin(),
        e = MostDerivedClass->method_end(); i != e; ++i) {
-    const CXXMethodDecl *MD = &*i;
+    const CXXMethodDecl *MD = *i;
     
     // We only want virtual member functions.
     if (!MD->isVirtual())
@@ -2116,10 +2136,16 @@ void VTableBuilder::dumpLayout(raw_ostream& Out) {
                                   MD);
 
     if (const CXXDestructorDecl *DD = dyn_cast<CXXDestructorDecl>(MD)) {
-      IndicesMap[VTables.getMethodVTableIndex(GlobalDecl(DD, Dtor_Complete))] =
-        MethodName + " [complete]";
-      IndicesMap[VTables.getMethodVTableIndex(GlobalDecl(DD, Dtor_Deleting))] =
-        MethodName + " [deleting]";
+      // FIXME: Should add a layer of abstraction for vtable generation.
+      if (!isMicrosoftABI()) {
+        IndicesMap[VTables.getMethodVTableIndex(GlobalDecl(DD, Dtor_Complete))]
+          = MethodName + " [complete]";
+        IndicesMap[VTables.getMethodVTableIndex(GlobalDecl(DD, Dtor_Deleting))]
+          = MethodName + " [deleting]";
+      } else {
+        IndicesMap[VTables.getMethodVTableIndex(GlobalDecl(DD, Dtor_Deleting))]
+          = MethodName + " [scalar deleting]";
+      }
     } else {
       IndicesMap[VTables.getMethodVTableIndex(MD)] = MethodName;
     }
@@ -2150,12 +2176,14 @@ VTableLayout::VTableLayout(uint64_t NumVTableComponents,
                            const VTableComponent *VTableComponents,
                            uint64_t NumVTableThunks,
                            const VTableThunkTy *VTableThunks,
-                           const AddressPointsMapTy &AddressPoints)
+                           const AddressPointsMapTy &AddressPoints,
+                           bool IsMicrosoftABI)
   : NumVTableComponents(NumVTableComponents),
     VTableComponents(new VTableComponent[NumVTableComponents]),
     NumVTableThunks(NumVTableThunks),
     VTableThunks(new VTableThunkTy[NumVTableThunks]),
-    AddressPoints(AddressPoints) {
+    AddressPoints(AddressPoints),
+    IsMicrosoftABI(IsMicrosoftABI) {
   std::copy(VTableComponents, VTableComponents+NumVTableComponents,
             this->VTableComponents.get());
   std::copy(VTableThunks, VTableThunks+NumVTableThunks,
@@ -2163,6 +2191,11 @@ VTableLayout::VTableLayout(uint64_t NumVTableComponents,
 }
 
 VTableLayout::~VTableLayout() { }
+
+VTableContext::VTableContext(ASTContext &Context)
+  : Context(Context),
+    IsMicrosoftABI(Context.getTargetInfo().getCXXABI().isMicrosoft()) {
+}
 
 VTableContext::~VTableContext() {
   llvm::DeleteContainerSeconds(VTableLayouts);
@@ -2217,7 +2250,7 @@ void VTableContext::ComputeMethodVTableIndices(const CXXRecordDecl *RD) {
   
   for (CXXRecordDecl::method_iterator i = RD->method_begin(),
        e = RD->method_end(); i != e; ++i) {
-    const CXXMethodDecl *MD = &*i;
+    const CXXMethodDecl *MD = *i;
 
     // We only want virtual methods.
     if (!MD->isVirtual())
@@ -2235,12 +2268,18 @@ void VTableContext::ComputeMethodVTableIndices(const CXXRecordDecl *RD) {
         if (const CXXDestructorDecl *DD = dyn_cast<CXXDestructorDecl>(MD)) {
           const CXXDestructorDecl *OverriddenDD = 
             cast<CXXDestructorDecl>(OverriddenMD);
-          
-          // Add both the complete and deleting entries.
-          MethodVTableIndices[GlobalDecl(DD, Dtor_Complete)] = 
-            getMethodVTableIndex(GlobalDecl(OverriddenDD, Dtor_Complete));
-          MethodVTableIndices[GlobalDecl(DD, Dtor_Deleting)] = 
-            getMethodVTableIndex(GlobalDecl(OverriddenDD, Dtor_Deleting));
+
+          if (!isMicrosoftABI()) {
+            // Add both the complete and deleting entries.
+            MethodVTableIndices[GlobalDecl(DD, Dtor_Complete)] =
+              getMethodVTableIndex(GlobalDecl(OverriddenDD, Dtor_Complete));
+            MethodVTableIndices[GlobalDecl(DD, Dtor_Deleting)] =
+              getMethodVTableIndex(GlobalDecl(OverriddenDD, Dtor_Deleting));
+          } else {
+            // Add the scalar deleting destructor.
+            MethodVTableIndices[GlobalDecl(DD, Dtor_Deleting)] =
+              getMethodVTableIndex(GlobalDecl(OverriddenDD, Dtor_Deleting));
+          }
         } else {
           MethodVTableIndices[MD] = getMethodVTableIndex(OverriddenMD);
         }
@@ -2258,11 +2297,16 @@ void VTableContext::ComputeMethodVTableIndices(const CXXRecordDecl *RD) {
         continue;
       } 
 
-      // Add the complete dtor.
-      MethodVTableIndices[GlobalDecl(DD, Dtor_Complete)] = CurrentIndex++;
-      
-      // Add the deleting dtor.
-      MethodVTableIndices[GlobalDecl(DD, Dtor_Deleting)] = CurrentIndex++;
+      if (!isMicrosoftABI()) {
+        // Add the complete dtor.
+        MethodVTableIndices[GlobalDecl(DD, Dtor_Complete)] = CurrentIndex++;
+
+        // Add the deleting dtor.
+        MethodVTableIndices[GlobalDecl(DD, Dtor_Deleting)] = CurrentIndex++;
+      } else {
+        // Add the scalar deleting dtor.
+        MethodVTableIndices[GlobalDecl(DD, Dtor_Deleting)] = CurrentIndex++;
+      }
     } else {
       // Add the entry.
       MethodVTableIndices[MD] = CurrentIndex++;
@@ -2273,6 +2317,11 @@ void VTableContext::ComputeMethodVTableIndices(const CXXRecordDecl *RD) {
     // Itanium C++ ABI 2.5.2:
     //   If a class has an implicitly-defined virtual destructor, 
     //   its entries come after the declared virtual function pointers.
+
+    if (isMicrosoftABI()) {
+      ErrorUnsupported("implicit virtual destructor in the Microsoft ABI",
+                       ImplicitVirtualDtor->getLocation());
+    }
 
     // Add the complete dtor.
     MethodVTableIndices[GlobalDecl(ImplicitVirtualDtor, Dtor_Complete)] = 
@@ -2353,7 +2402,8 @@ static VTableLayout *CreateVTableLayout(const VTableBuilder &Builder) {
                           Builder.vtable_component_begin(),
                           VTableThunks.size(),
                           VTableThunks.data(),
-                          Builder.getAddressPoints());
+                          Builder.getAddressPoints(),
+                          Builder.isMicrosoftABI());
 }
 
 void VTableContext::ComputeVTableRelatedInformation(const CXXRecordDecl *RD) {
@@ -2391,6 +2441,14 @@ void VTableContext::ComputeVTableRelatedInformation(const CXXRecordDecl *RD) {
     
     VirtualBaseClassOffsetOffsets.insert(std::make_pair(ClassPair, I->second));
   }
+}
+
+void VTableContext::ErrorUnsupported(StringRef Feature,
+                                     SourceLocation Location) {
+  clang::DiagnosticsEngine &Diags = Context.getDiagnostics();
+  unsigned DiagID = Diags.getCustomDiagID(DiagnosticsEngine::Error,
+                                  "v-table layout for %0 is not supported yet");
+  Diags.Report(Context.getFullLoc(Location), DiagID) << Feature;
 }
 
 VTableLayout *VTableContext::createConstructionVTableLayout(

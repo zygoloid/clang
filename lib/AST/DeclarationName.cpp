@@ -281,7 +281,7 @@ IdentifierInfo *DeclarationName::getCXXLiteralIdentifier() const {
 void *DeclarationName::getFETokenInfoAsVoidSlow() const {
   switch (getNameKind()) {
   case Identifier:
-    llvm_unreachable("Handled by getFETokenInfoAsVoid()");
+    llvm_unreachable("Handled by getFETokenInfo()");
 
   case CXXConstructorName:
   case CXXDestructorName:
@@ -362,6 +362,21 @@ DeclarationNameTable::~DeclarationNameTable() {
 
   delete SpecialNames;
   delete LiteralNames;
+}
+
+DeclarationName DeclarationNameTable::getCXXConstructorName(CanQualType Ty) {
+  return getCXXSpecialName(DeclarationName::CXXConstructorName,
+                           Ty.getUnqualifiedType());
+}
+
+DeclarationName DeclarationNameTable::getCXXDestructorName(CanQualType Ty) {
+  return getCXXSpecialName(DeclarationName::CXXDestructorName,
+                           Ty.getUnqualifiedType());
+}
+
+DeclarationName
+DeclarationNameTable::getCXXConversionFunctionName(CanQualType Ty) {
+  return getCXXSpecialName(DeclarationName::CXXConversionFunctionName, Ty);
 }
 
 DeclarationName

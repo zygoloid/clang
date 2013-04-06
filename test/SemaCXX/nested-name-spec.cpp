@@ -93,8 +93,7 @@ void f3() {
 }
 
 // make sure the following doesn't hit any asserts
-void f4(undef::C); // expected-error {{use of undeclared identifier 'undef'}} \
-                      expected-error {{variable has incomplete type 'void'}}
+void f4(undef::C); // expected-error {{use of undeclared identifier 'undef'}}
 
 typedef void C2::f5(int); // expected-error{{typedef declarator cannot be qualified}}
 
@@ -143,7 +142,7 @@ namespace A {
   void g(int&); // expected-note{{type of 1st parameter of member declaration does not match definition ('int &' vs 'const int &')}}
 } 
 
-void A::f() {} // expected-error{{out-of-line definition of 'f' does not match any declaration in namespace 'A'}}
+void A::f() {} // expected-error-re{{out-of-line definition of 'f' does not match any declaration in namespace 'A'$}}
 
 void A::g(const int&) { } // expected-error{{out-of-line definition of 'g' does not match any declaration in namespace 'A'}}
 
@@ -160,7 +159,7 @@ namespace N {
   void f();
   // FIXME: if we move this to a separate definition of N, things break!
 }
-void ::global_func2(int) { } // expected-warning{{extra qualification on member 'global_func2'}}
+void ::global_func2(int) { } // expected-error{{extra qualification on member 'global_func2'}}
 
 void N::f() { } // okay
 
@@ -246,15 +245,15 @@ namespace PR7133 {
 }
 
 class CLASS {
-  void CLASS::foo2(); // expected-warning {{extra qualification on member 'foo2'}}
+  void CLASS::foo2(); // expected-error {{extra qualification on member 'foo2'}}
 };
 
 namespace PR8159 {
   class B { };
 
   class A {
-    int A::a; // expected-warning{{extra qualification on member 'a'}}
-    static int A::b; // expected-warning{{extra qualification on member 'b'}}
+    int A::a; // expected-error{{extra qualification on member 'a'}}
+    static int A::b; // expected-error{{extra qualification on member 'b'}}
     int ::c; // expected-error{{non-friend class member 'c' cannot have a qualified name}}
   };
 }
@@ -285,4 +284,16 @@ protected:
 };
 template <typename T>
 struct A2<T>::B::C; // expected-error {{no struct named 'C'}}
+}
+
+namespace PR13033 {
+namespace NS {
+ int a; // expected-note {{'NS::a' declared here}}
+ int longer_b; //expected-note {{'NS::longer_b' declared here}}
+}
+
+// Suggest adding a namespace qualifier to both variable names even though one
+// is only a single character long.
+int foobar = a + longer_b; // expected-error {{use of undeclared identifier 'a'; did you mean 'NS::a'?}} \
+                           // expected-error {{use of undeclared identifier 'longer_b'; did you mean 'NS::longer_b'?}}
 }

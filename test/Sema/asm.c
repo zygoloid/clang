@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 %s -triple i386-pc-linux-gnu -verify -fsyntax-only
+// RUN: %clang_cc1 %s -Wno-private-extern -triple i386-pc-linux-gnu -verify -fsyntax-only
 
 void f() {
   int i;
@@ -122,4 +122,11 @@ void test12(void) {
 void test13(void) {
   void *esp;
   __asm__ volatile ("mov %%esp, %o" : "=r"(esp) : : ); // expected-error {{invalid % escape in inline assembly string}}
+}
+
+// <rdar://problem/12700799>
+struct S;  // expected-note 2 {{forward declaration of 'struct S'}}
+void test14(struct S *s) {
+  __asm("": : "a"(*s)); // expected-error {{dereference of pointer to incomplete type 'struct S'}}
+  __asm("": "=a" (*s) :); // expected-error {{dereference of pointer to incomplete type 'struct S'}}
 }

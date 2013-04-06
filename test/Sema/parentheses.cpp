@@ -22,6 +22,8 @@ public:
   operator int();
   Stream &operator<<(int);
   Stream &operator<<(const char*);
+  Stream &operator>>(int);
+  Stream &operator>>(const char*);
 };
 
 void f(Stream& s, bool b) {
@@ -44,4 +46,26 @@ void test(S *s, bool (S::*m_ptr)()) {
 
   // Don't crash on unusual member call expressions.
   (void)((s->*m_ptr)() ? "foo" : "bar");
+}
+
+void test(int a, int b, int c) {
+  (void)(a >> b + c); // expected-warning {{operator '>>' has lower precedence than '+'; '+' will be evaluated first}} \
+                         expected-note {{place parentheses around the '+' expression to silence this warning}}
+  (void)(a - b << c); // expected-warning {{operator '<<' has lower precedence than '-'; '-' will be evaluated first}} \
+                         expected-note {{place parentheses around the '-' expression to silence this warning}}
+  Stream() << b + c;
+  Stream() >> b + c; // expected-warning {{operator '>>' has lower precedence than '+'; '+' will be evaluated first}} \
+                        expected-note {{place parentheses around the '+' expression to silence this warning}}
+}
+
+namespace PR15628 {
+  struct BlockInputIter {
+    void* operator++(int);
+    void* operator--(int);
+  };
+
+  void test(BlockInputIter i) {
+    (void)(i++ ? true : false); // no-warning
+    (void)(i-- ? true : false); // no-warning
+  }
 }

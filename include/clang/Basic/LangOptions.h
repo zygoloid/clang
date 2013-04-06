@@ -6,20 +6,31 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-//
-//  This file defines the LangOptions interface.
-//
+///
+/// \file
+/// \brief Defines the clang::LangOptions interface.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_CLANG_LANGOPTIONS_H
 #define LLVM_CLANG_LANGOPTIONS_H
 
-#include <string>
+#include "clang/Basic/CommentOptions.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/Visibility.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
+#include <string>
 
 namespace clang {
+
+struct SanitizerOptions {
+#define SANITIZER(NAME, ID) unsigned ID : 1;
+#include "clang/Basic/Sanitizers.def"
+
+  /// \brief Cached set of sanitizer options with all sanitizers disabled.
+  static const SanitizerOptions Disabled;
+};
 
 /// Bitfields of LangOptions, split out from LangOptions in order to ensure that
 /// this large collection of bitfields is a trivial class type.
@@ -30,6 +41,7 @@ public:
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Description)
 #include "clang/Basic/LangOptions.def"
 
+  SanitizerOptions Sanitize;
 protected:
   // Define language options of enumeration type. These are private, and will
   // have accessors (below).
@@ -39,8 +51,8 @@ protected:
 #include "clang/Basic/LangOptions.def"
 };
 
-/// LangOptions - This class keeps track of the various options that can be
-/// enabled, which controls the dialect of C that is accepted.
+/// \brief Keeps track of the various options that can be
+/// enabled, which controls the dialect of C or C++ that is accepted.
 class LangOptions : public RefCountedBase<LangOptions>, public LangOptionsBase {
 public:
   typedef clang::Visibility Visibility;
@@ -55,14 +67,21 @@ public:
   };
 
 public:
+  clang::ObjCRuntime ObjCRuntime;
+
   std::string ObjCConstantStringClass;
   
-  /// The name of the handler function to be called when -ftrapv is specified.
+  /// \brief The name of the handler function to be called when -ftrapv is
+  /// specified.
+  ///
   /// If none is specified, abort (GCC-compatible behaviour).
   std::string OverflowHandler;
 
   /// \brief The name of the current module.
   std::string CurrentModule;
+
+  /// \brief Options for parsing comments.
+  CommentOptions CommentOpts;
   
   LangOptions();
 
@@ -82,7 +101,7 @@ public:
   void resetNonModularOptions();
 };
 
-/// Floating point control options
+/// \brief Floating point control options
 class FPOptions {
 public:
   unsigned fp_contract : 1;
@@ -93,7 +112,7 @@ public:
     fp_contract(LangOpts.DefaultFPContract) {}
 };
 
-/// OpenCL volatile options
+/// \brief OpenCL volatile options
 class OpenCLOptions {
 public:
 #define OPENCLEXT(nm)  unsigned nm : 1;
@@ -116,7 +135,6 @@ enum TranslationUnitKind {
   TU_Module
 };
   
-  /// \brief 
 }  // end namespace clang
 
 #endif

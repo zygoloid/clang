@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fobjc-fragile-abi -emit-llvm -fexceptions -fobjc-exceptions -O2 -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -fobjc-exceptions -O2 -o - %s | FileCheck %s
 //
 // <rdar://problem/7471679> [irgen] [eh] Exception code built with clang (x86_64) crashes
 
@@ -28,7 +28,7 @@ void f1() {
     // CHECK:      call void asm sideeffect "", "*m"
     // CHECK-NEXT: call void @foo()
       foo();
-    // CHECK-NEXT: call void @objc_exception_try_exit
+    // CHECK:      call void @objc_exception_try_exit
 
     // CHECK:      call void asm sideeffect "", "=*m"
     } @finally {
@@ -149,8 +149,8 @@ void f4() {
   // finally.call-exit:  Predecessors are the @try and @catch fallthroughs
   // as well as the no-match case in the catch mechanism.  The i1 is whether
   // to rethrow and should be true only in the last case.
-  // CHECK:      phi i1
-  // CHECK-NEXT: phi i8*
+  // CHECK:      phi i8*
+  // CHECK-NEXT: phi i1
   // CHECK-NEXT: call void @objc_exception_try_exit([[EXNDATA_T]]* [[EXNDATA]])
   // CHECK-NEXT: call void @f4_help(i32 2)
   // CHECK-NEXT: br i1

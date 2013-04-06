@@ -25,6 +25,9 @@ namespace final {
     struct T final : S {}; // expected-error {{base 'S' is marked 'final'}}
     struct T bar : S {}; // expected-error {{expected ';' after top level declarator}} expected-error {{expected unqualified-id}}
   }
+  // _Alignas isn't allowed in the places where alignas is. We used to
+  // assert on this.
+  struct U final _Alignas(4) {}; // expected-error 3{{}} expected-note {{}}
 }
 
 // enum versus bitfield mess.
@@ -57,7 +60,7 @@ namespace bitfield {
   // This could be a bit-field, but would be ill-formed due to the anonymous
   // member being initialized.
   struct S5 {
-    enum E : int { a = 1 } { b = 2 }; // expected-error {{expected member name}}
+    enum E : int { a = 1 } { b = 2 }; // expected-error {{expected ';' after enum}} expected-error {{expected member name}}
   };
   // This could be a bit-field.
   struct S6 {
@@ -85,7 +88,7 @@ namespace trailing_return {
 
   struct S {
     S(int);
-    S *operator()() const;
+    S *operator()(...) const;
     int n;
   };
 
@@ -94,7 +97,9 @@ namespace trailing_return {
       // This parses as a function declaration, but DR1223 makes the presence of
       // 'auto' be used for disambiguation.
       S(a)()->n; // ok, expression; expected-warning{{expression result unused}}
+      S(a)(int())->n; // ok, expression; expected-warning{{expression result unused}}
       auto(a)()->n; // ok, function declaration
+      auto(b)(int())->n; // ok, function declaration
       using T = decltype(a);
       using T = auto() -> n;
     }
@@ -108,7 +113,7 @@ namespace ellipsis {
     void f(S(...args[sizeof(T)])); // expected-note {{here}}
     void f(S(...args)[sizeof(T)]); // expected-error {{redeclared}} expected-note {{here}}
     void f(S ...args[sizeof(T)]); // expected-error {{redeclared}}
-    void g(S(...[sizeof(T)])); // expected-note {{here}}
+    void g(S(...[sizeof(T)])); // expected-note {{here}} expected-warning {{ISO C++11 requires a parenthesized pack declaration to have a name}}
     void g(S(...)[sizeof(T)]); // expected-error {{function cannot return array type}}
     void g(S ...[sizeof(T)]); // expected-error {{redeclared}}
     void h(T(...)); // function type, expected-error {{unexpanded parameter pack}}
@@ -123,5 +128,24 @@ namespace ellipsis {
     void j(T(T...)); // expected-error {{unexpanded parameter pack}}
     void k(int(...)(T)); // expected-error {{cannot return function type}}
     void k(int ...(T));
+    void l(int(&...)(T)); // expected-warning {{ISO C++11 requires a parenthesized pack declaration to have a name}}
+    void l(int(*...)(T)); // expected-warning {{ISO C++11 requires a parenthesized pack declaration to have a name}}
+    void l(int(S<int>::*...)(T)); // expected-warning {{ISO C++11 requires a parenthesized pack declaration to have a name}}
   };
+}
+
+namespace braced_init_list {
+  struct X {
+    void foo() {}
+  };
+
+  void (*pf1)() {};
+  void (X::*pmf1)() {&X::foo};
+  void (X::*pmf2)() = {&X::foo};
+
+  void test() {
+    void (*pf2)() {};
+    void (X::*pmf3)() {&X::foo};
+    void (X::*pmf4)() = {&X::foo};
+  }
 }

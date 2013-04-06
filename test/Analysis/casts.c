@@ -1,5 +1,6 @@
-// RUN: %clang_cc1 -triple x86_64-apple-darwin9 -analyze -analyzer-checker=core,experimental.core -analyzer-store=region -verify %s
-// RUN: %clang_cc1 -triple i386-apple-darwin9 -analyze -analyzer-checker=core,experimental.core -analyzer-store=region -verify %s
+// RUN: %clang_cc1 -triple x86_64-apple-darwin9 -analyze -analyzer-checker=core,alpha.core -analyzer-store=region -verify %s
+// RUN: %clang_cc1 -triple i386-apple-darwin9 -analyze -analyzer-checker=core,alpha.core -analyzer-store=region -verify %s
+// expected-no-diagnostics
 
 // Test if the 'storage' region gets properly initialized after it is cast to
 // 'struct sockaddr *'. 
@@ -64,4 +65,23 @@ void pr6013_6035_test(void *p) {
   unsigned int foo;
   foo = ((long)(p));
   (void) foo;
+}
+
+// PR12511 and radar://11215362 - Test that we support SymCastExpr, which represents symbolic int to float cast.
+char ttt(int intSeconds) {
+  double seconds = intSeconds;
+  if (seconds)
+    return 0;
+  return 0;
+}
+
+int foo (int* p) {
+  int y = 0;
+  if (p == 0) {
+    if ((*((void**)&p)) == (void*)0) // Test that the cast to void preserves the symbolic region.
+      return 0;
+    else
+      return 5/y; // This code should be unreachable: no-warning.
+  }
+  return 0;
 }

@@ -17,7 +17,7 @@ namespace InClassInitializers {
   // is false.
   bool ThrowSomething() noexcept(false);
   struct ConstExpr {
-    bool b = noexcept(ConstExpr()) && ThrowSomething(); // expected-error {{exception specification is not available until end of class definition}}
+    bool b = noexcept(ConstExpr()) && ThrowSomething(); // expected-error {{cannot be used by non-static data member initializer}}
   };
   // We can use it now.
   bool w = noexcept(ConstExpr());
@@ -25,18 +25,24 @@ namespace InClassInitializers {
   // Much more obviously broken: we can't parse the initializer without already
   // knowing whether it produces a noexcept expression.
   struct TemplateArg {
-    int n = ExceptionIf<noexcept(TemplateArg())>::f(); // expected-error {{exception specification is not available until end of class definition}}
+    int n = ExceptionIf<noexcept(TemplateArg())>::f(); // expected-error {{cannot be used by non-static data member initializer}}
   };
   bool x = noexcept(TemplateArg());
 
   // And within a nested class.
-  struct Nested {
+  struct Nested { // expected-error {{cannot be used by non-static data member initializer}}
     struct Inner {
-      int n = ExceptionIf<noexcept(Nested())>::f(); // expected-error {{exception specification is not available until end of class definition}}
+      int n = ExceptionIf<noexcept(Nested())>::f(); // expected-note {{implicit default constructor for 'InClassInitializers::Nested' first required here}}
     } inner;
   };
-  bool y = noexcept(Nested());
-  bool z = noexcept(Nested::Inner());
+
+  struct Nested2 {
+    struct Inner;
+    int n = Inner().n; // expected-error {{cannot be used by non-static data member initializer}}
+    struct Inner {
+      int n = ExceptionIf<noexcept(Nested2())>::f();
+    } inner;
+  };
 }
 
 namespace ExceptionSpecification {

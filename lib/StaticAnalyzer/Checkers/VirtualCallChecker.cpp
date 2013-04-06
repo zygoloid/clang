@@ -15,11 +15,12 @@
 #include "ClangSACheckers.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/StmtVisitor.h"
-#include "llvm/Support/SaveAndRestore.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
-#include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
+#include "clang/StaticAnalyzer/Core/Checker.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/SaveAndRestore.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
 using namespace ento;
@@ -46,7 +47,7 @@ class WalkAST : public StmtVisitor<WalkAST> {
                                 visited. */
               PostVisited  /**< A CallExpr to this FunctionDecl is in the
                                 worklist, and the body has been visited. */
-  } K;
+  };
 
   /// A DenseMap that records visited states of FunctionDecls.
   llvm::DenseMap<const FunctionDecl *, Kind> VisitedFunctions;

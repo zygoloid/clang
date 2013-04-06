@@ -104,3 +104,70 @@ namespace PR10270 {
       return;
   }
 }
+
+namespace rdar11806334 {
+
+class cc_YCbCr;
+
+class cc_rgb
+{
+ public:
+  cc_rgb( uint p ); // expected-error {{unknown type name}}
+  cc_rgb( cc_YCbCr v_in );
+};
+
+class cc_hsl
+{
+ public:
+  cc_rgb rgb();
+  cc_YCbCr YCbCr();
+};
+
+class cc_YCbCr
+{
+ public:
+  cc_YCbCr( const cc_rgb v_in );
+};
+
+cc_YCbCr cc_hsl::YCbCr()
+{
+ cc_YCbCr v_out = cc_YCbCr( rgb());
+ return v_out;
+}
+
+}
+
+namespace test1 {
+  int getString(const int*);
+  template<int a> class ELFObjectFile  {
+    const int* sh;
+    ELFObjectFile() {
+      switch (*sh) {
+      }
+      int SectionName(getString(sh));
+    }
+  };
+}
+
+namespace test2 {
+  struct fltSemantics ;
+  const fltSemantics &foobar();
+  void VisitCastExpr(int x) {
+    switch (x) {
+    case 42:
+      const fltSemantics &Sem = foobar();
+    }
+  }
+}
+
+namespace test3 {
+  struct nsCSSRect {
+  };
+  static int nsCSSRect::* sides;
+  nsCSSRect dimenX;
+  void ParseBoxCornerRadii(int y) {
+    switch (y) {
+    }
+    int& x = dimenX.*sides;
+  }
+}

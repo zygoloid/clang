@@ -1,10 +1,11 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -Wno-objc-root-class %s
+// RUN: %clang_cc1 -x objective-c++ -fsyntax-only -verify -Wno-objc-root-class %s
 
 @interface A {
-  int X __attribute__((deprecated));
+  int X __attribute__((deprecated)); // expected-note 2 {{declared here}}
 }
-+ (void)F __attribute__((deprecated));
-- (void)f __attribute__((deprecated));
++ (void)F __attribute__((deprecated)); // expected-note 2 {{declared here}}
+- (void)f __attribute__((deprecated)); // expected-note 4 {{declared here}}
 @end
 
 @implementation A
@@ -42,7 +43,7 @@
 @end
 
 @protocol P
-- (void)p __attribute__((deprecated));
+- (void)p __attribute__((deprecated)); // expected-note {{declared here}}
 @end
 
 void t1(A *a)
@@ -71,7 +72,7 @@ void t4(Class c)
 
 @interface Bar 
 
-@property (assign, setter = MySetter:) int FooBar __attribute__ ((deprecated));
+@property (assign, setter = MySetter:) int FooBar __attribute__ ((deprecated)); // expected-note 2 {{declared here}}
 - (void) MySetter : (int) value;
 @end
 
@@ -83,7 +84,7 @@ int t5() {
 
 
 __attribute ((deprecated))  
-@interface DEPRECATED {
+@interface DEPRECATED { // expected-note 2 {{declared here}}
   @public int ivar; 
   DEPRECATED *ivar2; // no warning.
 } 
@@ -107,7 +108,8 @@ __attribute ((deprecated))
 
 
 @interface Test2
-@property int test2 __attribute__((deprecated));
+@property int test2 __attribute__((deprecated)); // expected-note 4 {{declared here}} \
+						 // expected-note 2 {{property 'test2' is declared deprecated here}}
 @end
 
 void test(Test2 *foo) {
@@ -120,4 +122,35 @@ void test(Test2 *foo) {
 
 __attribute__((deprecated))
 @interface A(Blah) // expected-error{{attributes may not be specified on a category}}
+@end
+
+
+typedef struct {
+	int x;
+} footype __attribute((deprecated)); // expected-note 2 {{declared here}}
+
+@interface foo {
+	footype a; // expected-warning {{'footype' is deprecated}}
+	footype b __attribute((deprecated));
+}
+@property footype c; // expected-warning {{'footype' is deprecated}}
+@property footype d __attribute((deprecated));
+@end
+
+// rdar://13569424
+@interface NewI
++(void)cmeth;
+@end
+
+typedef NewI DeprI __attribute__((deprecated("blah"))); // expected-note 4 {{'DeprI' declared here}}
+
+@interface SI : DeprI // expected-warning {{'DeprI' is deprecated: blah}}
+-(DeprI*)meth; // expected-warning {{'DeprI' is deprecated: blah}}
+@end
+
+@implementation SI
+-(DeprI*)meth { // expected-warning {{'DeprI' is deprecated: blah}}
+  [DeprI cmeth]; // expected-warning {{'DeprI' is deprecated: blah}}
+  return 0;
+}
 @end

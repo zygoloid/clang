@@ -13,10 +13,14 @@
 
 #include "clang/Basic/Version.h"
 #include "clang/Basic/LLVM.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Config/config.h"
-#include <cstring>
+#include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
+#include <cstring>
+
+#ifdef HAVE_SVN_VERSION_INC
+#  include "SVNVersion.inc"
+#endif
 
 namespace clang {
 
@@ -136,8 +140,7 @@ std::string getClangFullCPPVersion() {
 #ifdef CLANG_VENDOR
   OS << CLANG_VENDOR;
 #endif
-  OS << "Clang " CLANG_VERSION_STRING " ("
-     << getClangFullRepositoryVersion() << ')';
+  OS << "Clang " CLANG_VERSION_STRING " " << getClangFullRepositoryVersion();
   return OS.str();
 }
 

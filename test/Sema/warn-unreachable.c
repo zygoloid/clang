@@ -80,8 +80,8 @@ void test2() {
     -           // expected-warning {{will never be executed}}
       halt();
   case 8:
-    i           // expected-warning {{will never be executed}}
-      +=
+    i
+      +=        // expected-warning {{will never be executed}}
       halt();
   case 9:
     halt()
@@ -93,8 +93,8 @@ void test2() {
   case 11: {
     int a[5];
     live(),
-      a[halt()  // expected-warning {{will never be executed}}
-        ];
+      a[halt()
+        ];      // expected-warning {{will never be executed}}
   }
   }
 }
@@ -132,3 +132,12 @@ void PR9774(int *s) {
         s[i] = 0;
 }
 
+// Test case for <rdar://problem/11005770>.  We should treat code guarded
+// by 'x & 0' and 'x * 0' as unreachable.
+void calledFun();
+void test_mul_and_zero(int x) {
+  if (x & 0) calledFun(); // expected-warning {{will never be executed}}
+  if (0 & x) calledFun(); // expected-warning {{will never be executed}}
+  if (x * 0) calledFun(); // expected-warning {{will never be executed}}
+  if (0 * x) calledFun(); // expected-warning {{will never be executed}}
+}

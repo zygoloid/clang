@@ -1,4 +1,4 @@
-@__experimental_modules_import category_top;
+@import category_top;
 
 @interface Foo(Right1)
 -(void)right1;
@@ -8,5 +8,5 @@
 -(void)right2;
 @end
 
-@interface Foo(Duplicate) // expected-warning {{duplicate definition of category}}
+@interface Foo(Duplicate)
 @end

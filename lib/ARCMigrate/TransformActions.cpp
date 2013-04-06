@@ -8,9 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "Internals.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
-#include "clang/Lex/Preprocessor.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Lex/Preprocessor.h"
 #include "llvm/ADT/DenseSet.h"
 #include <map>
 using namespace clang;

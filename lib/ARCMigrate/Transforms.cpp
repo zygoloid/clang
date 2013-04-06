@@ -1,4 +1,4 @@
-//===--- Tranforms.cpp - Tranformations to ARC mode -----------------------===//
+//===--- Transforms.cpp - Transformations to ARC mode ---------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -9,13 +9,17 @@
 
 #include "Transforms.h"
 #include "Internals.h"
-#include "clang/Sema/SemaDiagnostic.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtVisitor.h"
-#include "clang/Lex/Lexer.h"
+#include "clang/Analysis/DomainSpecific/CocoaConventions.h"
 #include "clang/Basic/SourceManager.h"
-#include "llvm/ADT/StringSwitch.h"
+#include "clang/Basic/TargetInfo.h"
+#include "clang/Lex/Lexer.h"
+#include "clang/Sema/Sema.h"
+#include "clang/Sema/SemaDiagnostic.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/StringSwitch.h"
 #include <map>
 
 using namespace clang;
@@ -24,13 +28,20 @@ using namespace trans;
 
 ASTTraverser::~ASTTraverser() { }
 
+bool MigrationPass::CFBridgingFunctionsDefined() {
+  if (!EnableCFBridgeFns.hasValue())
+    EnableCFBridgeFns = SemaRef.isKnownName("CFBridgingRetain") &&
+                        SemaRef.isKnownName("CFBridgingRelease");
+  return *EnableCFBridgeFns;
+}
+
 //===----------------------------------------------------------------------===//
 // Helpers.
 //===----------------------------------------------------------------------===//
 
 bool trans::canApplyWeak(ASTContext &Ctx, QualType type,
                          bool AllowOnUnknownClass) {
-  if (!Ctx.getLangOpts().ObjCRuntimeHasWeak)
+  if (!Ctx.getLangOpts().ObjCARCWeak)
     return false;
 
   QualType T = type;
@@ -49,11 +60,61 @@ bool trans::canApplyWeak(ASTContext &Ctx, QualType type,
       return false; // id/NSObject is not safe for weak.
     if (!AllowOnUnknownClass && !Class->hasDefinition())
       return false; // forward classes are not verifiable, therefore not safe.
-    if (Class->isArcWeakrefUnavailable())
+    if (Class && Class->isArcWeakrefUnavailable())
       return false;
   }
 
   return true;
+}
+
+bool trans::isPlusOneAssign(const BinaryOperator *E) {
+  if (E->getOpcode() != BO_Assign)
+    return false;
+
+  return isPlusOne(E->getRHS());
+}
+
+bool trans::isPlusOne(const Expr *E) {
+  if (!E)
+    return false;
+  if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(E))
+    E = EWC->getSubExpr();
+
+  if (const ObjCMessageExpr *
+        ME = dyn_cast<ObjCMessageExpr>(E->IgnoreParenCasts()))
+    if (ME->getMethodFamily() == OMF_retain)
+      return true;
+
+  if (const CallExpr *
+        callE = dyn_cast<CallExpr>(E->IgnoreParenCasts())) {
+    if (const FunctionDecl *FD = callE->getDirectCallee()) {
+      if (FD->getAttr<CFReturnsRetainedAttr>())
+        return true;
+
+      if (FD->isGlobal() &&
+          FD->getIdentifier() &&
+          FD->getParent()->isTranslationUnit() &&
+          FD->hasExternalLinkage() &&
+          ento::cocoa::isRefType(callE->getType(), "CF",
+                                 FD->getIdentifier()->getName())) {
+        StringRef fname = FD->getIdentifier()->getName();
+        if (fname.endswith("Retain") ||
+            fname.find("Create") != StringRef::npos ||
+            fname.find("Copy") != StringRef::npos) {
+          return true;
+        }
+      }
+    }
+  }
+
+  const ImplicitCastExpr *implCE = dyn_cast<ImplicitCastExpr>(E);
+  while (implCE && implCE->getCastKind() ==  CK_BitCast)
+    implCE = dyn_cast<ImplicitCastExpr>(implCE->getSubExpr());
+
+  if (implCE && implCE->getCastKind() == CK_ARCConsumeObject)
+    return true;
+
+  return false;
 }
 
 /// \brief 'Loc' is the end of a statement range. This returns the location
@@ -137,7 +198,7 @@ bool trans::isGlobalVar(Expr *E) {
   E = E->IgnoreParenCasts();
   if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E))
     return DRE->getDecl()->getDeclContext()->isFileContext() &&
-           DRE->getDecl()->getLinkage() == ExternalLinkage;
+           DRE->getDecl()->hasExternalLinkage();
   if (ConditionalOperator *condOp = dyn_cast<ConditionalOperator>(E))
     return isGlobalVar(condOp->getTrueExpr()) &&
            isGlobalVar(condOp->getFalseExpr());
@@ -512,6 +573,7 @@ static void traverseAST(MigrationPass &pass) {
   }
   MigrateCtx.addTraverser(new PropertyRewriteTraverser());
   MigrateCtx.addTraverser(new BlockObjCVariableTraverser());
+  MigrateCtx.addTraverser(new ProtectedScopeTraverser());
 
   MigrateCtx.traverse(pass.Ctx.getTranslationUnitDecl());
 }

@@ -3,14 +3,10 @@ clang_tablegen(Checkers.inc -gen-clang-sa-checkers
   SOURCE Checkers.td
   TARGET ClangSACheckers)
 
-set(LLVM_USED_LIBS clangBasic clangAST clangStaticAnalyzerCore)
-
 add_clang_library(clangStaticAnalyzerCheckers
-  AdjustedReturnValueChecker.cpp
   AnalyzerStatsChecker.cpp
   ArrayBoundChecker.cpp
   ArrayBoundCheckerV2.cpp
-  AttrNonNullChecker.cpp
   BasicObjCFoundationChecks.cpp
   BoolAssignmentChecker.cpp
   BuiltinFunctionChecker.cpp
@@ -30,11 +26,14 @@ add_clang_library(clangStaticAnalyzerCheckers
   DeadStoresChecker.cpp
   DebugCheckers.cpp
   DereferenceChecker.cpp
+  DirectIvarAssignment.cpp
   DivZeroChecker.cpp
+  DynamicTypePropagation.cpp
+  ExprInspectionChecker.cpp
   FixedAddressChecker.cpp
   GenericTaintChecker.cpp
   IdempotentOperationChecker.cpp
-  IteratorsChecker.cpp
+  IvarInvalidationChecker.cpp
   LLVMConventionsChecker.cpp
   MacOSKeychainAPIChecker.cpp
   MacOSXAPIChecker.cpp
@@ -43,11 +42,12 @@ add_clang_library(clangStaticAnalyzerCheckers
   MallocSizeofChecker.cpp
   NSAutoreleasePoolChecker.cpp
   NSErrorChecker.cpp
+  NonNullParamChecker.cpp
   NoReturnFunctionChecker.cpp
-  OSAtomicChecker.cpp
   ObjCAtSyncChecker.cpp
   ObjCContainersASTChecker.cpp
   ObjCContainersChecker.cpp
+  ObjCMissingSuperCallChecker.cpp
   ObjCSelfInitChecker.cpp
   ObjCUnusedIVarsChecker.cpp
   PointerArithChecker.cpp
@@ -56,9 +56,11 @@ add_clang_library(clangStaticAnalyzerCheckers
   RetainCountChecker.cpp
   ReturnPointerRangeChecker.cpp
   ReturnUndefChecker.cpp
+  SimpleStreamChecker.cpp
   StackAddrEscapeChecker.cpp
   StreamChecker.cpp
   TaintTesterChecker.cpp
+  TraversalChecker.cpp
   UndefBranchChecker.cpp
   UndefCapturedBlockVarChecker.cpp
   UndefResultChecker.cpp
@@ -74,7 +76,15 @@ add_dependencies(clangStaticAnalyzerCheckers
   clangStaticAnalyzerCore
   ClangAttrClasses
   ClangAttrList
+  ClangCommentNodes
   ClangDeclNodes
+  ClangDiagnosticCommon
   ClangStmtNodes
   ClangSACheckers
+  )
+
+target_link_libraries(clangStaticAnalyzerCheckers
+  clangBasic
+  clangAST
+  clangStaticAnalyzerCore
   )

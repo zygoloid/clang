@@ -190,11 +190,12 @@ void test_DO(DO *d, A* a) {
 }
 
 // RUN: c-index-test -code-completion-at=%s:23:19 %s | FileCheck -check-prefix=CHECK-CC1 %s
-// CHECK-CC1: {TypedText categoryClassMethod} (35) (parent: ObjCCategoryDecl 'Foo(FooTestCategory)')
-// CHECK-CC1: {TypedText classMethod1:}{Placeholder (id)}{HorizontalSpace  }{TypedText withKeyword:}{Placeholder (int)} (35) (parent: ObjCInterfaceDecl 'Foo')
-// CHECK-CC1: {TypedText classMethod2} (35) (parent: ObjCInterfaceDecl 'Foo')
-// CHECK-CC1: {TypedText new} (35) (parent: ObjCInterfaceDecl 'Foo')
-// CHECK-CC1: {TypedText protocolClassMethod} (37) (parent: ObjCProtocolDecl 'FooTestProtocol')
+// CHECK-CC1: {TypedText categoryClassMethod} (35)
+// CHECK-CC1: {TypedText classMethod1:}{Placeholder (id)}{HorizontalSpace  }{TypedText withKeyword:}{Placeholder (int)} (35)
+// CHECK-CC1: {TypedText classMethod2} (35)
+// CHECK-CC1: {TypedText instanceMethod1} (35)
+// CHECK-CC1: {TypedText new} (35)
+// CHECK-CC1: {TypedText protocolClassMethod} (37)
 // CHECK-CC1: Completion contexts:
 // CHECK-CC1-NEXT: Objective-C class method
 // CHECK-CC1-NEXT: Container Kind: ObjCInterfaceDecl
@@ -238,15 +239,15 @@ void test_DO(DO *d, A* a) {
 // CHECK-CC9: ObjCInstanceMethodDecl:{ResultType int}{Informative Method:}{Informative Arg1:}{TypedText OtherArg:}{Placeholder (id)}
 // CHECK-CC9: Objective-C selector: Method:Arg1:
 // RUN: c-index-test -code-completion-at=%s:61:11 %s | FileCheck -check-prefix=CHECK-CCA %s
-// CHECK-CCA: TypedefDecl:{TypedText Class}
-// CHECK-CCA-NEXT: ObjCInterfaceDecl:{TypedText Foo}
-// CHECK-CCA-NOT: FunctionDecl:{ResultType void}{TypedText func}{LeftParen (}{RightParen )}
-// CHECK-CCA:FunctionDecl:{ResultType MyClass *}{TypedText getMyClass}{LeftParen (}{RightParen )}
-// CHECK-CCA: TypedefDecl:{TypedText id}
-// CHECK-CCA: ObjCInterfaceDecl:{TypedText MyClass}
-// CHECK-CCA: ObjCInterfaceDecl:{TypedText MySubClass}
-// CHECK-CCA: {ResultType Class}{TypedText self}
-// CHECK-CCA: {TypedText super}
+// CHECK-CCA: TypedefDecl:{TypedText Class} (50)
+// CHECK-CCA-NEXT: ObjCInterfaceDecl:{TypedText Foo} (50)
+// CHECK-CCA-NOT: FunctionDecl:{ResultType void}{TypedText func}{LeftParen (}{RightParen )} (50)
+// CHECK-CCA:FunctionDecl:{ResultType MyClass *}{TypedText getMyClass}{LeftParen (}{RightParen )} (50)
+// CHECK-CCA: TypedefDecl:{TypedText id} (50)
+// CHECK-CCA: ObjCInterfaceDecl:{TypedText MyClass} (50)
+// CHECK-CCA: ObjCInterfaceDecl:{TypedText MySubClass} (50)
+// CHECK-CCA: {ResultType Class}{TypedText self} (34)
+// CHECK-CCA: {TypedText super} (40)
 // RUN: c-index-test -code-completion-at=%s:103:6 %s | FileCheck -check-prefix=CHECK-CCB %s
 // CHECK-CCB: ObjCInstanceMethodDecl:{ResultType int}{TypedText Method:}{Placeholder (int), ...}
 // CHECK-CCB: ObjCInstanceMethodDecl:{ResultType int}{TypedText SentinelMethod:}{Placeholder (int), ...}{Text , nil}
@@ -309,7 +310,7 @@ void test_DO(DO *d, A* a) {
 
 // RUN: c-index-test -code-completion-at=%s:170:16 %s | FileCheck -check-prefix=CHECK-CLASS-RESULT %s
 // CHECK-CLASS-RESULT: ObjCClassMethodDecl:{ResultType void}{TypedText class_method3} (35)
-// CHECK-CLASS-RESULT: ObjCClassMethodDecl:{ResultType void}{TypedText class_method4} (35) (parent: ObjCCategoryDecl 'A(Cat)')
+// CHECK-CLASS-RESULT: ObjCClassMethodDecl:{ResultType void}{TypedText class_method4} (35)
 
 // RUN: c-index-test -code-completion-at=%s:181:4 %s | FileCheck -check-prefix=CHECK-BLOCK-RECEIVER %s
 // CHECK-BLOCK-RECEIVER: ObjCInterfaceDecl:{TypedText A} (50)

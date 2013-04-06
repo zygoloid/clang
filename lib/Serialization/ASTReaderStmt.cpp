@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Serialization/ASTReader.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/StmtVisitor.h"
@@ -131,6 +132,8 @@ void ASTStmtReader::VisitCompoundStmt(CompoundStmt *S) {
 void ASTStmtReader::VisitSwitchCase(SwitchCase *S) {
   VisitStmt(S);
   Reader.RecordSwitchCaseID(S, Record[Idx++]);
+  S->setKeywordLoc(ReadSourceLocation(Record, Idx));
+  S->setColonLoc(ReadSourceLocation(Record, Idx));
 }
 
 void ASTStmtReader::VisitCaseStmt(CaseStmt *S) {
@@ -138,16 +141,12 @@ void ASTStmtReader::VisitCaseStmt(CaseStmt *S) {
   S->setLHS(Reader.ReadSubExpr());
   S->setRHS(Reader.ReadSubExpr());
   S->setSubStmt(Reader.ReadSubStmt());
-  S->setCaseLoc(ReadSourceLocation(Record, Idx));
   S->setEllipsisLoc(ReadSourceLocation(Record, Idx));
-  S->setColonLoc(ReadSourceLocation(Record, Idx));
 }
 
 void ASTStmtReader::VisitDefaultStmt(DefaultStmt *S) {
   VisitSwitchCase(S);
   S->setSubStmt(Reader.ReadSubStmt());
-  S->setDefaultLoc(ReadSourceLocation(Record, Idx));
-  S->setColonLoc(ReadSourceLocation(Record, Idx));
 }
 
 void ASTStmtReader::VisitLabelStmt(LabelStmt *S) {
@@ -161,9 +160,13 @@ void ASTStmtReader::VisitLabelStmt(LabelStmt *S) {
 
 void ASTStmtReader::VisitAttributedStmt(AttributedStmt *S) {
   VisitStmt(S);
+  uint64_t NumAttrs = Record[Idx++];
   AttrVec Attrs;
   Reader.ReadAttributes(F, Attrs, Record, Idx);
-  S->Attrs = Attrs;
+  (void)NumAttrs;
+  assert(NumAttrs == S->NumAttrs);
+  assert(NumAttrs == Attrs.size());
+  std::copy(Attrs.begin(), Attrs.end(), S->Attrs);
   S->SubStmt = Reader.ReadSubStmt();
   S->AttrLoc = ReadSourceLocation(Record, Idx);
 }
@@ -283,7 +286,7 @@ void ASTStmtReader::VisitDeclStmt(DeclStmt *S) {
   }
 }
 
-void ASTStmtReader::VisitAsmStmt(AsmStmt *S) {
+void ASTStmtReader::VisitGCCAsmStmt(GCCAsmStmt *S) {
   VisitStmt(S);
   unsigned NumOutputs = Record[Idx++];
   unsigned NumInputs = Record[Idx++];
@@ -292,7 +295,6 @@ void ASTStmtReader::VisitAsmStmt(AsmStmt *S) {
   S->setRParenLoc(ReadSourceLocation(Record, Idx));
   S->setVolatile(Record[Idx++]);
   S->setSimple(Record[Idx++]);
-  S->setMSAsm(Record[Idx++]);
 
   S->setAsmString(cast_or_null<StringLiteral>(Reader.ReadSubStmt()));
 
@@ -315,6 +317,11 @@ void ASTStmtReader::VisitAsmStmt(AsmStmt *S) {
                                     Names.data(), Constraints.data(), 
                                     Exprs.data(), NumOutputs, NumInputs, 
                                     Clobbers.data(), NumClobbers);
+}
+
+void ASTStmtReader::VisitMSAsmStmt(MSAsmStmt *S) {
+  // FIXME: Statement reader not yet implemented for MS style inline asm.
+  VisitStmt(S);
 }
 
 void ASTStmtReader::VisitExpr(Expr *E) {
@@ -371,8 +378,10 @@ void ASTStmtReader::VisitIntegerLiteral(IntegerLiteral *E) {
 
 void ASTStmtReader::VisitFloatingLiteral(FloatingLiteral *E) {
   VisitExpr(E);
-  E->setValue(Reader.getContext(), Reader.ReadAPFloat(Record, Idx));
+  E->setRawSemantics(static_cast<Stmt::APFloatSemantics>(Record[Idx++]));
   E->setExact(Record[Idx++]);
+  E->setValue(Reader.getContext(),
+              Reader.ReadAPFloat(Record, E->getSemantics(), Idx));
   E->setLocation(ReadSourceLocation(Record, Idx));
 }
 
@@ -519,6 +528,7 @@ void ASTStmtReader::VisitObjCIsaExpr(ObjCIsaExpr *E) {
   VisitExpr(E);
   E->setBase(Reader.ReadSubExpr());
   E->setIsaMemberLoc(ReadSourceLocation(Record, Idx));
+  E->setOpLoc(ReadSourceLocation(Record, Idx));
   E->setArrow(Record[Idx++]);
 }
 
@@ -556,6 +566,7 @@ void ASTStmtReader::VisitBinaryOperator(BinaryOperator *E) {
   E->setRHS(Reader.ReadSubExpr());
   E->setOpcode((BinaryOperator::Opcode)Record[Idx++]);
   E->setOperatorLoc(ReadSourceLocation(Record, Idx));
+  E->setFPContractable((bool)Record[Idx++]);
 }
 
 void ASTStmtReader::VisitCompoundAssignOperator(CompoundAssignOperator *E) {
@@ -617,7 +628,8 @@ void ASTStmtReader::VisitExtVectorElementExpr(ExtVectorElementExpr *E) {
 
 void ASTStmtReader::VisitInitListExpr(InitListExpr *E) {
   VisitExpr(E);
-  E->setSyntacticForm(cast_or_null<InitListExpr>(Reader.ReadSubStmt()));
+  if (InitListExpr *SyntForm = cast_or_null<InitListExpr>(Reader.ReadSubStmt()))
+    E->setSyntacticForm(SyntForm);
   E->setLBraceLoc(ReadSourceLocation(Record, Idx));
   E->setRBraceLoc(ReadSourceLocation(Record, Idx));
   bool isArrayFiller = Record[Idx++];
@@ -873,6 +885,7 @@ void ASTStmtReader::VisitObjCProtocolExpr(ObjCProtocolExpr *E) {
   VisitExpr(E);
   E->setProtocol(ReadDeclAs<ObjCProtocolDecl>(Record, Idx));
   E->setAtLoc(ReadSourceLocation(Record, Idx));
+  E->ProtoLoc = ReadSourceLocation(Record, Idx);
   E->setRParenLoc(ReadSourceLocation(Record, Idx));
 }
 
@@ -880,6 +893,7 @@ void ASTStmtReader::VisitObjCIvarRefExpr(ObjCIvarRefExpr *E) {
   VisitExpr(E);
   E->setDecl(ReadDeclAs<ObjCIvarDecl>(Record, Idx));
   E->setLocation(ReadSourceLocation(Record, Idx));
+  E->setOpLoc(ReadSourceLocation(Record, Idx));
   E->setBase(Reader.ReadSubExpr());
   E->setIsArrow(Record[Idx++]);
   E->setIsFreeIvar(Record[Idx++]);
@@ -1076,6 +1090,7 @@ void ASTStmtReader::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   VisitCallExpr(E);
   E->Operator = (OverloadedOperatorKind)Record[Idx++];
   E->Range = Reader.ReadSourceRange(F, Record, Idx);
+  E->setFPContractable((bool)Record[Idx++]);
 }
 
 void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
@@ -1089,6 +1104,7 @@ void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
   E->setLocation(ReadSourceLocation(Record, Idx));
   E->setElidable(Record[Idx++]);
   E->setHadMultipleCandidates(Record[Idx++]);
+  E->setListInitialization(Record[Idx++]);
   E->setRequiresZeroInitialization(Record[Idx++]);
   E->setConstructionKind((CXXConstructExpr::ConstructionKind)Record[Idx++]);
   E->ParenRange = ReadSourceRange(Record, Idx);
@@ -1133,6 +1149,8 @@ void ASTStmtReader::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
   SourceRange R = ReadSourceRange(Record, Idx);
   E->Loc = R.getBegin();
   E->RParenLoc = R.getEnd();
+  R = ReadSourceRange(Record, Idx);
+  E->AngleBrackets = R;
 }
 
 void ASTStmtReader::VisitCXXStaticCastExpr(CXXStaticCastExpr *E) {
@@ -1231,7 +1249,7 @@ void ASTStmtReader::VisitCXXNewExpr(CXXNewExpr *E) {
   E->setOperatorDelete(ReadDeclAs<FunctionDecl>(Record, Idx));
   E->AllocatedTypeInfo = GetTypeSourceInfo(Record, Idx);
   E->TypeIdParens = ReadSourceRange(Record, Idx);
-  E->StartLoc = ReadSourceLocation(Record, Idx);
+  E->Range = ReadSourceRange(Record, Idx);
   E->DirectInitRange = ReadSourceRange(Record, Idx);
 
   E->AllocateArgsArray(Reader.getContext(), isArray, NumPlacementArgs,
@@ -1356,8 +1374,6 @@ void ASTStmtReader::VisitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
 void ASTStmtReader::VisitUnresolvedLookupExpr(UnresolvedLookupExpr *E) {
   VisitOverloadExpr(E);
   E->RequiresADL = Record[Idx++];
-  if (E->RequiresADL)
-    E->StdIsAssociatedNamespace = Record[Idx++];
   E->Overloaded = Record[Idx++];
   E->NamingClass = ReadDeclAs<CXXRecordDecl>(Record, Idx);
 }
@@ -1456,6 +1472,16 @@ void ASTStmtReader::VisitSubstNonTypeTemplateParmPackExpr(
   E->Arguments = ArgPack.pack_begin();
   E->NumArguments = ArgPack.pack_size();
   E->NameLoc = ReadSourceLocation(Record, Idx);
+}
+
+void ASTStmtReader::VisitFunctionParmPackExpr(FunctionParmPackExpr *E) {
+  VisitExpr(E);
+  E->NumParameters = Record[Idx++];
+  E->ParamPack = ReadDeclAs<ParmVarDecl>(Record, Idx);
+  E->NameLoc = ReadSourceLocation(Record, Idx);
+  ParmVarDecl **Parms = reinterpret_cast<ParmVarDecl**>(E+1);
+  for (unsigned i = 0, n = E->NumParameters; i != n; ++i)
+    Parms[i] = ReadDeclAs<ParmVarDecl>(Record, Idx);
 }
 
 void ASTStmtReader::VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
@@ -1575,36 +1601,27 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
   Stmt::EmptyShell Empty;
 
   while (true) {
-    unsigned Code = Cursor.ReadCode();
-    if (Code == llvm::bitc::END_BLOCK) {
-      if (Cursor.ReadBlockEnd()) {
-        Error("error at end of block in AST file");
-        return 0;
-      }
+    llvm::BitstreamEntry Entry = Cursor.advanceSkippingSubblocks();
+    
+    switch (Entry.Kind) {
+    case llvm::BitstreamEntry::SubBlock: // Handled for us already.
+    case llvm::BitstreamEntry::Error:
+      Error("malformed block record in AST file");
+      return 0;
+    case llvm::BitstreamEntry::EndBlock:
+      goto Done;
+    case llvm::BitstreamEntry::Record:
+      // The interesting case.
       break;
     }
 
-    if (Code == llvm::bitc::ENTER_SUBBLOCK) {
-      // No known subblocks, always skip them.
-      Cursor.ReadSubBlockID();
-      if (Cursor.SkipBlock()) {
-        Error("malformed block record in AST file");
-        return 0;
-      }
-      continue;
-    }
-
-    if (Code == llvm::bitc::DEFINE_ABBREV) {
-      Cursor.ReadAbbrevRecord();
-      continue;
-    }
 
     Stmt *S = 0;
     Idx = 0;
     Record.clear();
     bool Finished = false;
     bool IsStmtReference = false;
-    switch ((StmtCode)Cursor.ReadRecord(Code, Record)) {
+    switch ((StmtCode)Cursor.readRecord(Entry.ID, Record)) {
     case STMT_STOP:
       Finished = true;
       break;
@@ -1641,7 +1658,9 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case STMT_ATTRIBUTED:
-      S = new (Context) AttributedStmt(Empty);
+      S = AttributedStmt::CreateEmpty(
+        Context,
+        /*NumAttrs*/Record[ASTStmtReader::NumStmtFields]);
       break;
 
     case STMT_IF:
@@ -1688,8 +1707,12 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       S = new (Context) DeclStmt(Empty);
       break;
 
-    case STMT_ASM:
-      S = new (Context) AsmStmt(Empty);
+    case STMT_GCCASM:
+      S = new (Context) GCCAsmStmt(Empty);
+      break;
+
+    case STMT_MSASM:
+      S = new (Context) MSAsmStmt(Empty);
       break;
 
     case EXPR_PREDEFINED:
@@ -1841,7 +1864,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case EXPR_INIT_LIST:
-      S = new (Context) InitListExpr(getContext(), Empty);
+      S = new (Context) InitListExpr(Empty);
       break;
 
     case EXPR_DESIGNATED_INIT:
@@ -2167,6 +2190,11 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_SUBST_NON_TYPE_TEMPLATE_PARM_PACK:
       S = new (Context) SubstNonTypeTemplateParmPackExpr(Empty);
       break;
+
+    case EXPR_FUNCTION_PARM_PACK:
+      S = FunctionParmPackExpr::CreateEmpty(Context,
+                                          Record[ASTStmtReader::NumExprFields]);
+      break;
         
     case EXPR_MATERIALIZE_TEMPORARY:
       S = new (Context) MaterializeTemporaryExpr(Empty);
@@ -2218,11 +2246,8 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     assert(Idx == Record.size() && "Invalid deserialization of statement");
     StmtStack.push_back(S);
   }
-
-#ifndef NDEBUG
+Done:
   assert(StmtStack.size() > PrevNumStmts && "Read too many sub stmts!");
   assert(StmtStack.size() == PrevNumStmts + 1 && "Extra expressions on stack!");
-#endif
-
   return StmtStack.pop_back_val();
 }

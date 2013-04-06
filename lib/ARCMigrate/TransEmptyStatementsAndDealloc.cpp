@@ -1,4 +1,4 @@
-//===--- TransEmptyStatements.cpp - Tranformations to ARC mode ------------===//
+//===--- TransEmptyStatements.cpp - Transformations to ARC mode -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -21,6 +21,7 @@
 
 #include "Transforms.h"
 #include "Internals.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/SourceManager.h"
 
@@ -44,7 +45,7 @@ static bool isEmptyARCMTMacroStatement(NullStmt *S,
   SourceManager &SM = Ctx.getSourceManager();
   std::vector<SourceLocation>::iterator
     I = std::upper_bound(MacroLocs.begin(), MacroLocs.end(), SemiLoc,
-                         SourceManager::LocBeforeThanCompare(SM));
+                         BeforeThanCompare<SourceLocation>(SM));
   --I;
   SourceLocation
       AfterMacroLoc = I->getLocWithOffset(getARCMTMacroName().size());

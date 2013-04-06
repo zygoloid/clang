@@ -4,6 +4,21 @@ typedef unsigned long NSUInteger;
 typedef const void * CFTypeRef;
 CFTypeRef CFBridgingRetain(id X);
 id CFBridgingRelease(CFTypeRef);
+@protocol NSCopying @end
+@interface NSDictionary
++ (id)dictionaryWithObjects:(const id [])objects forKeys:(const id <NSCopying> [])keys count:(NSUInteger)cnt;
+- (void)setObject:(id)object forKeyedSubscript:(id)key;
+@end
+@class NSFastEnumerationState;
+@protocol NSFastEnumeration
+- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState *)state objects:(id __unsafe_unretained [])buffer count:(NSUInteger)len;
+@end
+@interface NSNumber 
++ (NSNumber *)numberWithInt:(int)value;
+@end
+@interface NSArray <NSFastEnumeration>
++ (id)arrayWithObjects:(const id [])objects count:(NSUInteger)cnt;
+@end
 
 void test0(void (*fn)(int), int val) {
   fn(val);
@@ -641,7 +656,7 @@ void test35(void) {
   test36_helper(&y);
   ^{ test36_helper(&y); }();
 
-  __strong int non_objc_type; // expected-warning {{'__strong' only applies to objective-c object or block pointer types}} 
+  __strong int non_objc_type; // expected-warning {{'__strong' only applies to Objective-C object or block pointer types}} 
 }
 
 void test36(int first, ...) {
@@ -696,3 +711,48 @@ void _NSCalcBeze(NSColor* color, NSColor* bezelColors[]); // expected-error {{mu
 }
 @end
 
+// rdar://11814185
+@interface Radar11814185
+@property (nonatomic, weak)  Radar11814185* picker1;
++ alloc;
+- init;
+@end
+
+@implementation Radar11814185
+
+@synthesize picker1;
+
+- (void)viewDidLoad
+{
+    picker1 = [[Radar11814185 alloc] init]; // expected-warning {{assigning retained object to weak variable; object will be released after assignment}}
+    self.picker1 = [[Radar11814185 alloc] init]; // expected-warning {{assigning retained object to weak property; object will be released after assignment}}
+}
+
++ alloc { return 0; }
+- init { return 0; }
+@end
+
+// <rdar://problem/12569201>.  Warn on cases of initializing a weak variable
+// with an Objective-C object literal.
+void rdar12569201(id key, id value) {
+    // Declarations.
+    __weak id x = @"foo"; // no-warning
+    __weak id y = @{ key : value }; // expected-warning {{assigning dictionary literal to a weak variable; object will be released after assignment}}
+    __weak id z = @[ value ]; // expected-warning {{assigning array literal to a weak variable; object will be released after assignment}}
+    __weak id b = ^() {}; // expected-warning {{assigning block literal to a weak variable; object will be released after assignment}}
+    __weak id n = @42; // expected-warning {{assigning numeric literal to a weak variable; object will be released after assignment}}
+    __weak id e = @(42); // expected-warning {{assigning numeric literal to a weak variable; object will be released after assignment}}
+    __weak id m = @(41 + 1); // expected-warning {{assigning boxed expression to a weak variable; object will be released after assignment}}
+    
+    // Assignments.
+    y = @{ key : value }; // expected-warning {{assigning dictionary literal to a weak variable; object will be released after assignment}}
+    z = @[ value ]; // expected-warning {{assigning array literal to a weak variable; object will be released after assignment}}
+    b = ^() {}; // expected-warning {{assigning block literal to a weak variable; object will be released after assignment}}
+    n = @42; // expected-warning {{assigning numeric literal to a weak variable; object will be released after assignment}}
+    e = @(42); // expected-warning {{assigning numeric literal to a weak variable; object will be released after assignment}}
+    m = @(41 + 1); // expected-warning {{assigning boxed expression to a weak variable; object will be released after assignment}}
+}
+
+@interface C
+- (void)method:(id[])objects; // expected-error{{must explicitly describe intended ownership of an object array parameter}}
+@end

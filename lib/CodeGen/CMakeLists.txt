@@ -2,16 +2,16 @@ set(LLVM_LINK_COMPONENTS
   asmparser
   bitreader
   bitwriter
+  irreader
   instrumentation
   ipo
   linker
   vectorize
   )
 
-set(LLVM_USED_LIBS clangBasic clangAST clangFrontend)
-
 add_clang_library(clangCodeGen
   BackendUtil.cpp
+  CGAtomic.cpp
   CGBlocks.cpp
   CGBuiltin.cpp
   CGCall.cpp
@@ -52,5 +52,19 @@ add_clang_library(clangCodeGen
   TargetInfo.cpp
   )
 
-add_dependencies(clangCodeGen ClangAttrClasses ClangAttrList ClangDeclNodes
-                 ClangStmtNodes)
+add_dependencies(clangCodeGen
+  ClangARMNeon
+  ClangAttrClasses
+  ClangAttrList
+  ClangCommentNodes
+  ClangDeclNodes
+  ClangDiagnosticCommon
+  ClangDiagnosticFrontend
+  ClangStmtNodes
+  )
+
+target_link_libraries(clangCodeGen
+  clangBasic
+  clangAST
+  clangFrontend
+  )

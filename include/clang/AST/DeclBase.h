@@ -14,38 +14,40 @@
 #ifndef LLVM_CLANG_AST_DECLBASE_H
 #define LLVM_CLANG_AST_DECLBASE_H
 
-#include "clang/AST/Attr.h"
+#include "clang/AST/AttrIterator.h"
 #include "clang/AST/DeclarationName.h"
-#include "clang/AST/Type.h"
 #include "clang/Basic/Specifiers.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/PrettyStackTrace.h"
 
 namespace clang {
-class DeclContext;
-class TranslationUnitDecl;
-class NamespaceDecl;
-class UsingDirectiveDecl;
-class NamedDecl;
-class FunctionDecl;
-class CXXRecordDecl;
-class EnumDecl;
-class ObjCMethodDecl;
-class ObjCContainerDecl;
-class ObjCInterfaceDecl;
-class ObjCCategoryDecl;
-class ObjCProtocolDecl;
-class ObjCImplementationDecl;
-class ObjCCategoryImplDecl;
-class ObjCImplDecl;
-class LinkageSpecDecl;
-class BlockDecl;
-class DeclarationName;
-class CompoundStmt;
-class StoredDeclsMap;
-class DependentDiagnostic;
 class ASTMutationListener;
+class BlockDecl;
+class CXXRecordDecl;
+class CompoundStmt;
+class DeclContext;
+class DeclarationName;
+class DependentDiagnostic;
+class EnumDecl;
+class FunctionDecl;
+class LinkageSpecDecl;
+class Module;
+class NamedDecl;
+class NamespaceDecl;
+class ObjCCategoryDecl;
+class ObjCCategoryImplDecl;
+class ObjCContainerDecl;
+class ObjCImplDecl;
+class ObjCImplementationDecl;
+class ObjCInterfaceDecl;
+class ObjCMethodDecl;
+class ObjCProtocolDecl;
+struct PrintingPolicy;
+class Stmt;
+class StoredDeclsMap;
+class TranslationUnitDecl;
+class UsingDirectiveDecl;
 }
 
 namespace llvm {
@@ -133,7 +135,7 @@ public:
     /// or member ends up here.
     IDNS_Ordinary            = 0x0020,
 
-    /// Objective C @protocol.
+    /// Objective C \@protocol.
     IDNS_ObjCProtocol        = 0x0040,
 
     /// This declaration is a friend function.  A friend function
@@ -335,7 +337,10 @@ protected:
   static void *AllocateDeserializedDecl(const ASTContext &Context,
                                         unsigned ID,
                                         unsigned Size);
-  
+
+  /// \brief Update a potentially out-of-date declaration.
+  void updateOutOfDate(IdentifierInfo &II) const;
+
 public:
 
   /// \brief Source range that this declaration covers.
@@ -430,16 +435,10 @@ public:
   void dropAttr() {
     if (!HasAttrs) return;
 
-    AttrVec &Attrs = getAttrs();
-    for (unsigned i = 0, e = Attrs.size(); i != e; /* in loop */) {
-      if (isa<T>(Attrs[i])) {
-        Attrs.erase(Attrs.begin() + i);
-        --e;
-      }
-      else
-        ++i;
-    }
-    if (Attrs.empty())
+    AttrVec &Vec = getAttrs();
+    Vec.erase(std::remove_if(Vec.begin(), Vec.end(), isa<T, Attr*>), Vec.end());
+
+    if (Vec.empty())
       HasAttrs = false;
   }
 
@@ -461,9 +460,7 @@ public:
 
   /// getMaxAlignment - return the maximum alignment specified by attributes
   /// on this decl, 0 if there are none.
-  unsigned getMaxAlignment() const {
-    return hasAttrs() ? getMaxAttrAlignment(getAttrs(), getASTContext()) : 0;
-  }
+  unsigned getMaxAlignment() const;
 
   /// setInvalidDecl - Indicates the Decl had a semantic error. This
   /// allows for graceful error recovery.
@@ -599,7 +596,18 @@ public:
     
     return 0;
   }
-  
+
+private:
+  Module *getOwningModuleSlow() const;
+
+public:
+  Module *getOwningModule() const {
+    if (!isFromASTFile())
+      return 0;
+
+    return getOwningModuleSlow();
+  }
+
   unsigned getIdentifierNamespace() const {
     return IdentifierNamespace;
   }
@@ -693,18 +701,17 @@ public:
     Decl *Starter;
 
   public:
-    typedef Decl                     value_type;
-    typedef value_type&              reference;
-    typedef value_type*              pointer;
+    typedef Decl *value_type;
+    typedef const value_type &reference;
+    typedef const value_type *pointer;
     typedef std::forward_iterator_tag iterator_category;
-    typedef std::ptrdiff_t            difference_type;
+    typedef std::ptrdiff_t difference_type;
 
     redecl_iterator() : Current(0) { }
     explicit redecl_iterator(Decl *C) : Current(C), Starter(C) { }
 
-    reference operator*() const { return *Current; }
-    pointer operator->() const { return Current; }
-    operator pointer() const { return Current; }
+    reference operator*() const { return Current; }
+    value_type operator->() const { return Current; }
 
     redecl_iterator& operator++() {
       assert(Current && "Advancing while iterator has reached end");
@@ -845,8 +852,6 @@ public:
     IdentifierNamespace |= IDNS_NonMemberOperator;
   }
 
-  // Implement isa/cast/dyncast/etc.
-  static bool classof(const Decl *) { return true; }
   static bool classofKind(Kind K) { return true; }
   static DeclContext *castToDeclContext(const Decl *);
   static Decl *castFromDeclContext(const DeclContext *);
@@ -858,7 +863,12 @@ public:
   static void printGroup(Decl** Begin, unsigned NumDecls,
                          raw_ostream &Out, const PrintingPolicy &Policy,
                          unsigned Indentation = 0);
+  // Debuggers don't usually respect default arguments.
   LLVM_ATTRIBUTE_USED void dump() const;
+  // Same as dump(), but forces color printing.
+  LLVM_ATTRIBUTE_USED void dumpColor() const;
+  void dump(raw_ostream &Out) const;
+  // Debuggers don't usually respect default arguments.
   LLVM_ATTRIBUTE_USED void dumpXML() const;
   void dumpXML(raw_ostream &OS) const;
 
@@ -897,29 +907,9 @@ public:
   virtual void print(raw_ostream &OS) const;
 };
 
-class DeclContextLookupResult
-  : public std::pair<NamedDecl**,NamedDecl**> {
-public:
-  DeclContextLookupResult(NamedDecl **I, NamedDecl **E)
-    : std::pair<NamedDecl**,NamedDecl**>(I, E) {}
-  DeclContextLookupResult()
-    : std::pair<NamedDecl**,NamedDecl**>() {}
+typedef llvm::MutableArrayRef<NamedDecl*> DeclContextLookupResult;
 
-  using std::pair<NamedDecl**,NamedDecl**>::operator=;
-};
-
-class DeclContextLookupConstResult
-  : public std::pair<NamedDecl*const*, NamedDecl*const*> {
-public:
-  DeclContextLookupConstResult(std::pair<NamedDecl**,NamedDecl**> R)
-    : std::pair<NamedDecl*const*, NamedDecl*const*>(R) {}
-  DeclContextLookupConstResult(NamedDecl * const *I, NamedDecl * const *E)
-    : std::pair<NamedDecl*const*, NamedDecl*const*>(I, E) {}
-  DeclContextLookupConstResult()
-    : std::pair<NamedDecl*const*, NamedDecl*const*>() {}
-
-  using std::pair<NamedDecl*const*,NamedDecl*const*>::operator=;
-};
+typedef ArrayRef<NamedDecl *> DeclContextLookupConstResult;
 
 /// DeclContext - This is used only as base class of specific decl types that
 /// can act as declaration contexts. These decls are (only the top classes
@@ -941,19 +931,26 @@ class DeclContext {
   /// \brief Whether this declaration context also has some external
   /// storage that contains additional declarations that are lexically
   /// part of this context.
-  mutable unsigned ExternalLexicalStorage : 1;
+  mutable bool ExternalLexicalStorage : 1;
 
   /// \brief Whether this declaration context also has some external
   /// storage that contains additional declarations that are visible
   /// in this context.
-  mutable unsigned ExternalVisibleStorage : 1;
+  mutable bool ExternalVisibleStorage : 1;
+
+  /// \brief Whether this declaration context has had external visible
+  /// storage added since the last lookup. In this case, \c LookupPtr's
+  /// invariant may not hold and needs to be fixed before we perform
+  /// another lookup.
+  mutable bool NeedToReconcileExternalVisibleStorage : 1;
 
   /// \brief Pointer to the data structure used to lookup declarations
   /// within this context (or a DependentStoredDeclsMap if this is a
   /// dependent context), and a bool indicating whether we have lazily
   /// omitted any declarations from the map. We maintain the invariant
-  /// that, if the map contains an entry for a DeclarationName, then it
-  /// contains all relevant entries for that name.
+  /// that, if the map contains an entry for a DeclarationName (and we
+  /// haven't lazily omitted anything), then it contains all relevant
+  /// entries for that name.
   mutable llvm::PointerIntPair<StoredDeclsMap*, 1, bool> LookupPtr;
 
 protected:
@@ -976,10 +973,11 @@ protected:
   static std::pair<Decl *, Decl *>
   BuildDeclChain(ArrayRef<Decl*> Decls, bool FieldsAlreadyLoaded);
 
-   DeclContext(Decl::Kind K)
-     : DeclKind(K), ExternalLexicalStorage(false),
-       ExternalVisibleStorage(false), LookupPtr(0, false), FirstDecl(0),
-       LastDecl(0) { }
+  DeclContext(Decl::Kind K)
+      : DeclKind(K), ExternalLexicalStorage(false),
+        ExternalVisibleStorage(false),
+        NeedToReconcileExternalVisibleStorage(false), LookupPtr(0, false),
+        FirstDecl(0), LastDecl(0) {}
 
 public:
   ~DeclContext();
@@ -1092,6 +1090,10 @@ public:
   /// a C++ extern "C" linkage spec.
   bool isExternCContext() const;
 
+  /// \brief Determines whether this context is, or is nested within,
+  /// a C++ extern "C++" linkage spec.
+  bool isExternCXXContext() const;
+
   /// \brief Determine whether this declaration context is equivalent
   /// to the declaration context DC.
   bool Equals(const DeclContext *DC) const {
@@ -1143,7 +1145,7 @@ public:
   /// inline, its enclosing namespace, recursively.
   bool InEnclosingNamespaceSetOf(const DeclContext *NS) const;
 
-  /// \\brief Collects all of the declaration contexts that are semantically
+  /// \brief Collects all of the declaration contexts that are semantically
   /// connected to this declaration context.
   ///
   /// For declaration contexts that have multiple semantically connected but
@@ -1166,7 +1168,7 @@ public:
   /// contexts that are semanticaly connected to this declaration context,
   /// in source order, including this context (which may be the only result,
   /// for non-namespace contexts).
-  void collectAllContexts(llvm::SmallVectorImpl<DeclContext *> &Contexts);
+  void collectAllContexts(SmallVectorImpl<DeclContext *> &Contexts);
 
   /// decl_iterator - Iterates through the declarations stored
   /// within this context.
@@ -1175,9 +1177,9 @@ public:
     Decl *Current;
 
   public:
-    typedef Decl*                     value_type;
-    typedef Decl*                     reference;
-    typedef Decl*                     pointer;
+    typedef Decl *value_type;
+    typedef const value_type &reference;
+    typedef const value_type *pointer;
     typedef std::forward_iterator_tag iterator_category;
     typedef std::ptrdiff_t            difference_type;
 
@@ -1185,7 +1187,8 @@ public:
     explicit decl_iterator(Decl *C) : Current(C) { }
 
     reference operator*() const { return Current; }
-    pointer operator->() const { return Current; }
+    // This doesn't meet the iterator requirements, but it's convenient
+    value_type operator->() const { return Current; }
 
     decl_iterator& operator++() {
       Current = Current->getNextDeclInContext();
@@ -1209,14 +1212,14 @@ public:
   /// decls_begin/decls_end - Iterate over the declarations stored in
   /// this context.
   decl_iterator decls_begin() const;
-  decl_iterator decls_end() const;
+  decl_iterator decls_end() const { return decl_iterator(); }
   bool decls_empty() const;
 
   /// noload_decls_begin/end - Iterate over the declarations stored in this
   /// context that are currently loaded; don't attempt to retrieve anything
   /// from an external source.
   decl_iterator noload_decls_begin() const;
-  decl_iterator noload_decls_end() const;
+  decl_iterator noload_decls_end() const { return decl_iterator(); }
 
   /// specific_decl_iterator - Iterates over a subrange of
   /// declarations stored in a DeclContext, providing only those that
@@ -1239,9 +1242,11 @@ public:
     }
 
   public:
-    typedef SpecificDecl value_type;
-    typedef SpecificDecl& reference;
-    typedef SpecificDecl* pointer;
+    typedef SpecificDecl *value_type;
+    // TODO: Add reference and pointer typedefs (with some appropriate proxy
+    // type) if we ever have a need for them.
+    typedef void reference;
+    typedef void pointer;
     typedef std::iterator_traits<DeclContext::decl_iterator>::difference_type
       difference_type;
     typedef std::forward_iterator_tag iterator_category;
@@ -1260,8 +1265,9 @@ public:
       SkipToNextDecl();
     }
 
-    reference operator*() const { return *cast<SpecificDecl>(*Current); }
-    pointer operator->() const { return &**this; }
+    value_type operator*() const { return cast<SpecificDecl>(*Current); }
+    // This doesn't meet the iterator requirements, but it's convenient
+    value_type operator->() const { return **this; }
 
     specific_decl_iterator& operator++() {
       ++Current;
@@ -1313,9 +1319,11 @@ public:
     }
 
   public:
-    typedef SpecificDecl* value_type;
-    typedef SpecificDecl* reference;
-    typedef SpecificDecl* pointer;
+    typedef SpecificDecl *value_type;
+    // TODO: Add reference and pointer typedefs (with some appropriate proxy
+    // type) if we ever have a need for them.
+    typedef void reference;
+    typedef void pointer;
     typedef std::iterator_traits<DeclContext::decl_iterator>::difference_type
       difference_type;
     typedef std::forward_iterator_tag iterator_category;
@@ -1334,8 +1342,8 @@ public:
       SkipToNextDecl();
     }
 
-    reference operator*() const { return cast<SpecificDecl>(*Current); }
-    pointer operator->() const { return cast<SpecificDecl>(*Current); }
+    value_type operator*() const { return cast<SpecificDecl>(*Current); }
+    value_type operator->() const { return cast<SpecificDecl>(*Current); }
 
     filtered_decl_iterator& operator++() {
       ++Current;
@@ -1423,7 +1431,7 @@ public:
   /// usual relationship between a DeclContext and the external source.
   /// See the ASTImporter for the (few, but important) use cases.
   void localUncachedLookup(DeclarationName Name,
-                           llvm::SmallVectorImpl<NamedDecl *> &Results);
+                           SmallVectorImpl<NamedDecl *> &Results);
 
   /// @brief Makes a declaration visible within this context.
   ///
@@ -1471,6 +1479,13 @@ public:
   inline ddiag_iterator ddiag_end() const;
 
   // Low-level accessors
+    
+  /// \brief Mark the lookup table as needing to be built.  This should be
+  /// used only if setHasExternalLexicalStorage() has been called on any
+  /// decl context for which this is the primary context.
+  void setMustBuildLookupTable() {
+    LookupPtr.setInt(true);
+  }
 
   /// \brief Retrieve the internal representation of the lookup structure.
   /// This may omit some names if we are lazily building the structure.
@@ -1497,6 +1512,8 @@ public:
   /// declarations visible in this context.
   void setHasExternalVisibleStorage(bool ES = true) {
     ExternalVisibleStorage = ES;
+    if (ES && LookupPtr.getPointer())
+      NeedToReconcileExternalVisibleStorage = true;
   }
 
   /// \brief Determine whether the given declaration is stored in the list of
@@ -1508,14 +1525,11 @@ public:
 
   static bool classof(const Decl *D);
   static bool classof(const DeclContext *D) { return true; }
-#define DECL(NAME, BASE)
-#define DECL_CONTEXT(NAME) \
-  static bool classof(const NAME##Decl *D) { return true; }
-#include "clang/AST/DeclNodes.inc"
 
   LLVM_ATTRIBUTE_USED void dumpDeclContext() const;
 
 private:
+  void reconcileExternalVisibleStorage();
   void LoadLexicalDeclsFromExternalStorage() const;
 
   /// @brief Makes a declaration visible within this context, but
@@ -1632,23 +1646,6 @@ template<class FromTy>
 struct cast_convert_val< const ::clang::DeclContext, FromTy*, FromTy*> {
   static const ::clang::DeclContext *doit(const FromTy *Val) {
     return FromTy::castToDeclContext(Val);
-  }
-};
-
-// simplify_type - Allow clients to treat redecl_iterators just like Decl
-// pointers when using casting operators.
-template<> struct simplify_type< ::clang::Decl::redecl_iterator> {
-  typedef ::clang::Decl *SimpleType;
-  static SimpleType getSimplifiedValue(const ::clang::Decl::redecl_iterator
-      &Val) {
-    return Val;
-  }
-};
-template<> struct simplify_type<const ::clang::Decl::redecl_iterator> {
-  typedef ::clang::Decl *SimpleType;
-  static SimpleType getSimplifiedValue(const ::clang::Decl::redecl_iterator
-      &Val) {
-    return Val;
   }
 };
 

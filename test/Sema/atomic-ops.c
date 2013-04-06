@@ -1,4 +1,5 @@
-// RUN: %clang_cc1 %s -verify -fsyntax-only -triple=i686-linux-gnu
+// RUN: %clang_cc1 %s -verify -fsyntax-only -triple=i686-linux-gnu -std=c11
+// RUN: %clang_cc1 %s -verify -fsyntax-only -triple=aarch64-linux-gnu -std=c11
 
 // Basic parsing/Sema tests for __c11_atomic_*
 
@@ -17,7 +18,11 @@ _Static_assert(__GCC_ATOMIC_WCHAR_T_LOCK_FREE == 2, "");
 _Static_assert(__GCC_ATOMIC_SHORT_LOCK_FREE == 2, "");
 _Static_assert(__GCC_ATOMIC_INT_LOCK_FREE == 2, "");
 _Static_assert(__GCC_ATOMIC_LONG_LOCK_FREE == 2, "");
+#ifdef __i386__
 _Static_assert(__GCC_ATOMIC_LLONG_LOCK_FREE == 1, "");
+#else
+_Static_assert(__GCC_ATOMIC_LLONG_LOCK_FREE == 2, "");
+#endif
 _Static_assert(__GCC_ATOMIC_POINTER_LOCK_FREE == 2, "");
 
 _Static_assert(__c11_atomic_is_lock_free(1), "");
@@ -162,4 +167,12 @@ void f(_Atomic(int) *i, _Atomic(int*) *p, _Atomic(float) *d,
   __atomic_clear(&flag_k, memory_order_seq_cst); // expected-warning {{passing 'const volatile int *' to parameter of type 'volatile void *'}}
   __atomic_clear(&flag, memory_order_seq_cst);
   (int)__atomic_clear(&flag, memory_order_seq_cst); // expected-error {{operand of type 'void'}}
+
+  const _Atomic(int) const_atomic;
+  __c11_atomic_init(&const_atomic, 0); // expected-error {{first argument to atomic operation must be a pointer to non-const _Atomic type ('const _Atomic(int) *' invalid)}}
+  __c11_atomic_store(&const_atomic, 0, memory_order_release); // expected-error {{first argument to atomic operation must be a pointer to non-const _Atomic type ('const _Atomic(int) *' invalid)}}
+  __c11_atomic_load(&const_atomic, memory_order_acquire); // expected-error {{first argument to atomic operation must be a pointer to non-const _Atomic type ('const _Atomic(int) *' invalid)}}
 }
+
+_Atomic(int*) PR12527_a;
+void PR12527() { int *b = PR12527_a; }

@@ -1,4 +1,25 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fdebugger-objc-literal -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fdebugger-objc-literal -emit-llvm -o - %s -DINCLUDE_INTERFACES=1 | FileCheck %s
+
+// We need two different RUN lines here because the first time a class/method is absent,
+// it will be added for -fdebugger-objc-literal.
+
+#ifdef INCLUDE_INTERFACES
+@interface NSObject
+@end
+
+@interface NSNumber : NSObject
+@end
+
+@interface NSArray : NSObject
+@end
+
+@interface NSDictionary : NSObject
+@end
+
+@interface NSString : NSObject
+@end
+#endif
 
 int main() {
   // object literals.
@@ -29,4 +50,6 @@ int main() {
 #endif
 }
 
-// CHECK: declare i8* @objc_msgSend(i8*, i8*, ...) nonlazybind
+// CHECK: declare i8* @objc_msgSend(i8*, i8*, ...) [[NLB:#[0-9]+]]
+
+// CHECK: attributes [[NLB]] = { nonlazybind }

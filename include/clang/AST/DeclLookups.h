@@ -14,6 +14,7 @@
 #ifndef LLVM_CLANG_AST_DECLLOOKUPS_H
 #define LLVM_CLANG_AST_DECLLOOKUPS_H
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclContextInternals.h"
 #include "clang/AST/DeclarationName.h"
@@ -67,7 +68,7 @@ public:
 
 DeclContext::all_lookups_iterator DeclContext::lookups_begin() const {
   DeclContext *Primary = const_cast<DeclContext*>(this)->getPrimaryContext();
-  if (hasExternalVisibleStorage())
+  if (Primary->hasExternalVisibleStorage())
     getParentASTContext().getExternalSource()->completeVisibleDeclsMap(Primary);
   if (StoredDeclsMap *Map = Primary->buildLookup())
     return all_lookups_iterator(Map->begin(), Map->end());
@@ -76,7 +77,7 @@ DeclContext::all_lookups_iterator DeclContext::lookups_begin() const {
 
 DeclContext::all_lookups_iterator DeclContext::lookups_end() const {
   DeclContext *Primary = const_cast<DeclContext*>(this)->getPrimaryContext();
-  if (hasExternalVisibleStorage())
+  if (Primary->hasExternalVisibleStorage())
     getParentASTContext().getExternalSource()->completeVisibleDeclsMap(Primary);
   if (StoredDeclsMap *Map = Primary->buildLookup())
     return all_lookups_iterator(Map->end(), Map->end());

@@ -13,11 +13,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "ClangSACheckers.h"
-#include "clang/StaticAnalyzer/Core/Checker.h"
-#include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/StmtVisitor.h"
+#include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
+#include "clang/StaticAnalyzer/Core/Checker.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
 using namespace ento;
@@ -231,7 +232,7 @@ static void CheckASTMemory(const CXXRecordDecl *R, BugReporter &BR) {
   for (RecordDecl::field_iterator I = R->field_begin(), E = R->field_end();
        I != E; ++I) {
     ASTFieldVisitor walker(R, BR);
-    walker.Visit(&*I);
+    walker.Visit(*I);
   }
 }
 
@@ -247,7 +248,7 @@ void ASTFieldVisitor::Visit(FieldDecl *D) {
     const RecordDecl *RD = RT->getDecl()->getDefinition();
     for (RecordDecl::field_iterator I = RD->field_begin(), E = RD->field_end();
          I != E; ++I)
-      Visit(&*I);
+      Visit(*I);
   }
 
   FieldChain.pop_back();

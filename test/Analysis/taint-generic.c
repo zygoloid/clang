@@ -1,4 +1,4 @@
-// RUN: %clang_cc1  -analyze -analyzer-checker=experimental.security.taint,core,experimental.security.ArrayBoundV2 -Wno-format-security -verify %s
+// RUN: %clang_cc1  -analyze -analyzer-checker=alpha.security.taint,core,alpha.security.ArrayBoundV2 -Wno-format-security -verify %s
 
 int scanf(const char *restrict format, ...);
 int getchar(void);
@@ -212,3 +212,14 @@ int SymSymExprWithDiffTypes(void* p) {
   return 5/j; // expected-warning {{Division by a tainted value, possibly zero}}
 }
 
+
+void constraintManagerShouldTreatAsOpaque(int rhs) {
+  int i;
+  scanf("%d", &i);
+  // This comparison used to hit an assertion in the constraint manager,
+  // which didn't handle NonLoc sym-sym comparisons.
+  if (i < rhs)
+    return;
+  if (i < rhs)
+    *(volatile int *) 0; // no-warning
+}

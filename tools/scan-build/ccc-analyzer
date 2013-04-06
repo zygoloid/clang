@@ -31,11 +31,11 @@ my $DefaultCCompiler;
 my $DefaultCXXCompiler;
 
 if (`uname -a` =~ m/Darwin/) { 
-	$DefaultCCompiler = 'clang';
-	$DefaultCXXCompiler = 'clang++'; 
+  $DefaultCCompiler = 'clang';
+  $DefaultCXXCompiler = 'clang++';
 } else {
-    $DefaultCCompiler = 'gcc';
-    $DefaultCXXCompiler = 'g++'; 	
+  $DefaultCCompiler = 'gcc';
+  $DefaultCXXCompiler = 'g++';
 }
 
 if ($FindBin::Script =~ /c\+\+-analyzer/) {
@@ -182,11 +182,6 @@ sub Analyze {
   }
   else {
     $Cmd = $Clang;
-    if ($Lang eq "objective-c" || $Lang eq "objective-c++") {
-      push @Args,'-DIBOutlet=__attribute__((iboutlet))';
-      push @Args,'-DIBOutletCollection(ClassName)=__attribute__((iboutletcollection)))';
-      push @Args,'-DIBAction=void)__attribute__((ibaction)';
-    }
 
     # Create arguments for doing regular parsing.
     my $SyntaxArgs = GetCCArgs("-fsyntax-only", \@Args);
@@ -257,6 +252,7 @@ sub Analyze {
     print $ofh $_;
     print STDERR $_;
   }
+  close $ofh;
 
   waitpid($pid,0);
   close(FROM_CHILD);
@@ -274,7 +270,7 @@ sub Analyze {
                             $HtmlDir, $ParserRejects, $ofile);
       } else {
         ProcessClangFailure($Clang, $Lang, $file, \@CmdArgsSansAnalyses,
-                            $HtmlDir, $OtherError, $ofile);      	
+                            $HtmlDir, $OtherError, $ofile);
       }
     }
     else {
@@ -351,11 +347,15 @@ my %LinkerOptionMap = (
 
 my %CompilerLinkerOptionMap = (
   '-fobjc-arc' => 0,
+  '-fno-objc-arc' => 0,
   '-fobjc-abi-version' => 0, # This is really a 1 argument, but always has '='
+  '-fobjc-legacy-dispatch' => 0,
+  '-mios-simulator-version-min' => 0, # This really has 1 argument, but always has '='
   '-isysroot' => 1,
   '-arch' => 1,
   '-m32' => 0,
   '-m64' => 0,
+  '-stdlib' => 0, # This is really a 1 argument, but always has '='
   '-v' => 0,
   '-fpascal-strings' => 0,
   '-mmacosx-version-min' => 0, # This is really a 1 argument, but always has '='
@@ -390,6 +390,7 @@ my %LangMap = (
   'cxx' => 'c++',
   'txx' => 'c++',
   'cc'  => 'c++',
+  'C'   => 'c++',
   'ii'  => 'c++',
   'i'   => 'c-cpp-output',
   'm'   => 'objective-c',
@@ -434,11 +435,17 @@ if ($Status) { exit($Status >> 8); }
 # Get the analysis options.
 my $Analyses = $ENV{'CCC_ANALYZER_ANALYSIS'};
 
+# Get the plugins to load.
+my $Plugins = $ENV{'CCC_ANALYZER_PLUGINS'};
+
 # Get the store model.
 my $StoreModel = $ENV{'CCC_ANALYZER_STORE_MODEL'};
 
 # Get the constraints engine.
 my $ConstraintsModel = $ENV{'CCC_ANALYZER_CONSTRAINTS_MODEL'};
+
+#Get the internal stats setting.
+my $InternalStats = $ENV{'CCC_ANALYZER_INTERNAL_STATS'};
 
 # Get the output format.
 my $OutputFormat = $ENV{'CCC_ANALYZER_OUTPUT_FORMAT'};
@@ -482,6 +489,15 @@ foreach (my $i = 0; $i < scalar(@ARGV); ++$i) {
     my $Cnt = $CompileOptionMap{$ArgKey};
     push @CompileOpts,$Arg;
     while ($Cnt > 0) { ++$i; --$Cnt; push @CompileOpts, $ARGV[$i]; }
+    next;
+  }
+  if ($Arg =~ /-msse.*/) {
+    push @CompileOpts,$Arg;
+    next;
+  }
+  # Handle the case where there isn't a space after -iquote
+  if ($Arg =~ /-iquote.*/) {
+    push @CompileOpts,$Arg;
     next;
   }
 
@@ -612,7 +628,7 @@ if ($Action eq 'compile' or $Action eq 'link') {
   my @Archs = keys %ArchsSeen;
   # Skip the file if we don't support the architectures specified.
   exit 0 if ($HadArch && scalar(@Archs) == 0);
-  
+
   foreach my $file (@Files) {
     # Determine the language for the file.
     my $FileLang = $Lang;
@@ -644,9 +660,17 @@ if ($Action eq 'compile' or $Action eq 'link') {
     if (defined $ConstraintsModel) {
       push @AnalyzeArgs, "-analyzer-constraints=$ConstraintsModel";
     }
+
+    if (defined $InternalStats) {
+      push @AnalyzeArgs, "-analyzer-stats";
+    }
     
     if (defined $Analyses) {
       push @AnalyzeArgs, split '\s+', $Analyses;
+    }
+
+    if (defined $Plugins) {
+      push @AnalyzeArgs, split '\s+', $Plugins;
     }
 
     if (defined $OutputFormat) {
@@ -658,7 +682,7 @@ if ($Action eq 'compile' or $Action eq 'link') {
         $ResultFile = $f;
         # If the HtmlDir is not set, we sould clean up the plist files.
         if (!defined $HtmlDir || -z $HtmlDir) {
-        	$CleanupFile = $f; 
+          $CleanupFile = $f;
         }
       }
     }

@@ -40,7 +40,7 @@ void test9(short v) {
 
   old = __sync_fetch_and_add();  // expected-error {{too few arguments to function call}}
   old = __sync_fetch_and_add(&old);  // expected-error {{too few arguments to function call}}
-  old = __sync_fetch_and_add((unsigned*)0, 42i); // expected-warning {{imaginary constants are an extension}}
+  old = __sync_fetch_and_add((unsigned*)0, 42i); // expected-warning {{imaginary constants are a GNU extension}}
 
   // PR7600: Pointers are implicitly casted to integers and back.
   void *old_ptr = __sync_val_compare_and_swap((void**)0, 0, 0);
@@ -51,6 +51,20 @@ void test9(short v) {
   }
 }
 
+// overloaded atomics should be declared only once.
+void test9_1(volatile int* ptr, int val) {
+  __sync_fetch_and_add_4(ptr, val);
+}
+void test9_2(volatile int* ptr, int val) {
+  __sync_fetch_and_add(ptr, val);
+}
+void test9_3(volatile int* ptr, int val) {
+  __sync_fetch_and_add_4(ptr, val);
+  __sync_fetch_and_add(ptr, val);
+  __sync_fetch_and_add(ptr, val);
+  __sync_fetch_and_add_4(ptr, val);
+  __sync_fetch_and_add_4(ptr, val);
+}
 
 // rdar://7236819
 void test10(void) __attribute__((noreturn));
@@ -161,4 +175,19 @@ void test17() {
 #undef OPT
 #undef T
 #undef F
+}
+
+void test18() {
+  char src[1024];
+  char dst[2048];
+  size_t result;
+  void *ptr;
+
+  ptr = __builtin___memccpy_chk(dst, src, '\037', sizeof(src), sizeof(dst));
+  result = __builtin___strlcpy_chk(dst, src, sizeof(src), sizeof(dst));
+  result = __builtin___strlcat_chk(dst, src, sizeof(src), sizeof(dst));
+
+  ptr = __builtin___memccpy_chk(dst, src, '\037', sizeof(src));      // expected-error {{too few arguments to function call}}
+  ptr = __builtin___strlcpy_chk(dst, src, sizeof(src), sizeof(dst)); // expected-warning {{incompatible integer to pointer conversion}}
+  ptr = __builtin___strlcat_chk(dst, src, sizeof(src), sizeof(dst)); // expected-warning {{incompatible integer to pointer conversion}}
 }

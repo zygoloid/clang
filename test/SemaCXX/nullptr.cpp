@@ -33,8 +33,10 @@ nullptr_t f(nullptr_t null)
   // Operators
   (void)(null == nullptr);
   (void)(null <= nullptr);
+  (void)(null == 0);
   (void)(null == (void*)0);
   (void)((void*)0 == nullptr);
+  (void)(null <= 0);
   (void)(null <= (void*)0);
   (void)((void*)0 <= nullptr);
   (void)(0 == nullptr);
@@ -44,7 +46,7 @@ nullptr_t f(nullptr_t null)
   (void)(1 > nullptr); // expected-error {{invalid operands to binary expression}}
   (void)(1 != nullptr); // expected-error {{invalid operands to binary expression}}
   (void)(1 + nullptr); // expected-error {{invalid operands to binary expression}}
-  (void)(0 ? nullptr : 0); // expected-error {{non-pointer operand type 'int' incompatible with nullptr}}
+  (void)(0 ? nullptr : 0);
   (void)(0 ? nullptr : (void*)0);
   (void)(0 ? nullptr : A()); // expected-error {{non-pointer operand type 'A' incompatible with nullptr}}
   (void)(0 ? A() : nullptr); // expected-error {{non-pointer operand type 'A' incompatible with nullptr}}
@@ -55,7 +57,7 @@ nullptr_t f(nullptr_t null)
   o2(nullptr); // expected-error {{ambiguous}}
 
   // nullptr is an rvalue, null is an lvalue
-  (void)&nullptr; // expected-error {{address expression must be an lvalue}}
+  (void)&nullptr; // expected-error {{cannot take the address of an rvalue of type 'nullptr_t'}}
   nullptr_t *pn = &null;
 
   // You can reinterpret_cast nullptr to an integer.

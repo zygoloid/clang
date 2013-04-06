@@ -3,6 +3,8 @@
 @interface A
 @end
 
+@class NSString;
+
 template<typename T, typename U>
 struct is_same {
   static const bool value = false;
@@ -264,5 +266,29 @@ namespace rdar9828157 {
 
   void test_f(A* ap) {
     float &fr = (f)(ap);  
+  }
+}
+
+namespace rdar10862386 {
+  // More deduction with lifetime qualifiers.
+  template <typename T>
+  int testing(const T &) {
+      return 1;
+  }
+
+  void test() {
+     testing(1);
+      testing("hi");
+      testing<NSString *>(@"hi");
+      testing(@"hi");
+ }
+}
+
+namespace rdar12367446 {
+  template <class T> class A;
+  template <class R> class A<R()> {};
+
+  void test() {
+    A<id()> value;
   }
 }

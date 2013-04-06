@@ -11,6 +11,7 @@
 #define CLANG_DRIVER_TYPES_H_
 
 #include "clang/Driver/Phases.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace clang {
 namespace driver {
@@ -23,7 +24,7 @@ namespace types {
     TY_LAST
   };
 
-  /// getTypeName - Return the name of the type for \arg Id.
+  /// getTypeName - Return the name of the type for \p Id.
   const char *getTypeName(ID Id);
 
   /// getPreprocessedType - Get the ID of the type for this input when
@@ -59,10 +60,6 @@ namespace types {
   /// isAcceptedByClang - Can clang handle this input type.
   bool isAcceptedByClang(ID Id);
 
-  /// isOnlyAcceptedByClang - Is clang the only compiler that can handle this
-  /// input type.
-  bool isOnlyAcceptedByClang(ID Id);
-
   /// isCXX - Is this a "C++" input (C++ and Obj-C++ sources and headers).
   bool isCXX(ID Id);
 
@@ -70,21 +67,19 @@ namespace types {
   bool isObjC(ID Id);
 
   /// lookupTypeForExtension - Lookup the type to use for the file
-  /// extension \arg Ext.
+  /// extension \p Ext.
   ID lookupTypeForExtension(const char *Ext);
 
   /// lookupTypeForTypSpecifier - Lookup the type to use for a user
   /// specified type name.
   ID lookupTypeForTypeSpecifier(const char *Name);
 
-  /// getNumCompilationPhases - Return the complete number of phases
-  /// to be done for this type.
-  unsigned getNumCompilationPhases(ID Id);
+  /// getCompilationPhases - Get the list of compilation phases ('Phases') to be
+  /// done for type 'Id'.
+  void getCompilationPhases(
+    ID Id,
+    llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> &Phases);
 
-  /// getCompilationPhase - Return the \args N th compilation phase to
-  /// be done for this type.
-  phases::ID getCompilationPhase(ID Id, unsigned N);
-  
   /// lookupCXXTypeForCType - Lookup CXX input type that corresponds to given
   /// C type (used for clang++ emulation of g++ behaviour)
   ID lookupCXXTypeForCType(ID Id);

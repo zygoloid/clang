@@ -14,14 +14,15 @@
 #ifndef LLVM_CLANG_AST_PRETTY_PRINTER_H
 #define LLVM_CLANG_AST_PRETTY_PRINTER_H
 
-#include "clang/Basic/LangOptions.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/LangOptions.h"
 
 namespace clang {
 
+class LangOptions;
+class SourceManager;
 class Stmt;
 class TagDecl;
-class LangOptions;
 
 class PrinterHelper {
 public:
@@ -34,18 +35,18 @@ public:
 struct PrintingPolicy {
   /// \brief Create a default printing policy for C.
   PrintingPolicy(const LangOptions &LO)
-    : Indentation(2), LangOpts(LO), SuppressSpecifiers(false),
+    : LangOpts(LO), Indentation(2), SuppressSpecifiers(false),
       SuppressTagKeyword(false), SuppressTag(false), SuppressScope(false),
       SuppressUnwrittenScope(false), SuppressInitializers(false),
-      Dump(false), ConstantArraySizeAsWritten(false),
-      AnonymousTagLocations(true), SuppressStrongLifetime(false),
-      Bool(LO.Bool) { }
-
-  /// \brief The number of spaces to use to indent each line.
-  unsigned Indentation : 8;
+      ConstantArraySizeAsWritten(false), AnonymousTagLocations(true),
+      SuppressStrongLifetime(false), Bool(LO.Bool),
+      TerseOutput(false), PolishForDeclaration(false) { }
 
   /// \brief What language we're printing.
   LangOptions LangOpts;
+
+  /// \brief The number of spaces to use to indent each line.
+  unsigned Indentation : 8;
 
   /// \brief Whether we should suppress printing of the actual specifiers for
   /// the given type or declaration.
@@ -103,12 +104,6 @@ struct PrintingPolicy {
   /// internal initializer constructed for x will not be printed.
   bool SuppressInitializers : 1;
 
-  /// \brief True when we are "dumping" rather than "pretty-printing",
-  /// where dumping involves printing the internal details of the AST
-  /// and pretty-printing involves printing something similar to
-  /// source code.
-  bool Dump : 1;
-
   /// \brief Whether we should print the sizes of constant array expressions
   /// as written in the sources.
   ///
@@ -139,6 +134,18 @@ struct PrintingPolicy {
   /// \brief Whether we can use 'bool' rather than '_Bool', even if the language
   /// doesn't actually have 'bool' (because, e.g., it is defined as a macro).
   unsigned Bool : 1;
+
+  /// \brief Provide a 'terse' output.
+  ///
+  /// For example, in this mode we don't print function bodies, class members,
+  /// declarations inside namespaces etc.  Effectively, this should print
+  /// only the requested declaration.
+  unsigned TerseOutput : 1;
+  
+  /// \brief When true, do certain refinement needed for producing proper
+  /// declaration tag; such as, do not print attributes attached to the declaration.
+  ///
+  unsigned PolishForDeclaration : 1;
 };
 
 } // end namespace clang

@@ -18,8 +18,6 @@
 
 #include "clang/Frontend/DiagnosticRenderer.h"
 
-struct SourceColumnMap;
-
 namespace clang {
 
 /// \brief Class to encapsulate the logic for formatting and printing a textual
@@ -39,9 +37,8 @@ class TextDiagnostic : public DiagnosticRenderer {
 
 public:
   TextDiagnostic(raw_ostream &OS,
-                 const SourceManager &SM,
                  const LangOptions &LangOpts,
-                 const DiagnosticOptions &DiagOpts);
+                 DiagnosticOptions *DiagOpts);
 
   virtual ~TextDiagnostic();
   
@@ -60,7 +57,7 @@ public:
   ///
   /// This is a static helper to handle the line wrapping, colorizing, and
   /// rendering of a diagnostic message to a particular ostream. It is
-  /// publically visible so that clients which do not have sufficient state to
+  /// publicly visible so that clients which do not have sufficient state to
   /// build a complete TextDiagnostic object can still get consistent
   /// formatting of their diagnostic messages.
   ///
@@ -83,39 +80,44 @@ protected:
                                      DiagnosticsEngine::Level Level,
                                      StringRef Message,
                                      ArrayRef<CharSourceRange> Ranges,
+                                     const SourceManager *SM,
                                      DiagOrStoredDiag D);
 
   virtual void emitDiagnosticLoc(SourceLocation Loc, PresumedLoc PLoc,
                                  DiagnosticsEngine::Level Level,
-                                 ArrayRef<CharSourceRange> Ranges);
+                                 ArrayRef<CharSourceRange> Ranges,
+                                 const SourceManager &SM);
   
   virtual void emitCodeContext(SourceLocation Loc,
                                DiagnosticsEngine::Level Level,
                                SmallVectorImpl<CharSourceRange>& Ranges,
-                               ArrayRef<FixItHint> Hints) {
-    emitSnippetAndCaret(Loc, Level, Ranges, Hints);
+                               ArrayRef<FixItHint> Hints,
+                               const SourceManager &SM) {
+    emitSnippetAndCaret(Loc, Level, Ranges, Hints, SM);
   }
   
   virtual void emitBasicNote(StringRef Message);
   
-  virtual void emitIncludeLocation(SourceLocation Loc, PresumedLoc PLoc);
+  virtual void emitIncludeLocation(SourceLocation Loc, PresumedLoc PLoc,
+                                   const SourceManager &SM);
+
+  virtual void emitImportLocation(SourceLocation Loc, PresumedLoc PLoc,
+                                  StringRef ModuleName,
+                                  const SourceManager &SM);
+
+  virtual void emitBuildingModuleLocation(SourceLocation Loc, PresumedLoc PLoc,
+                                          StringRef ModuleName,
+                                          const SourceManager &SM);
 
 private:
   void emitSnippetAndCaret(SourceLocation Loc, DiagnosticsEngine::Level Level,
                            SmallVectorImpl<CharSourceRange>& Ranges,
-                           ArrayRef<FixItHint> Hints);
+                           ArrayRef<FixItHint> Hints,
+                           const SourceManager &SM);
 
   void emitSnippet(StringRef SourceLine);
 
-  void highlightRange(const CharSourceRange &R,
-                      unsigned LineNo, FileID FID,
-                      const SourceColumnMap &map,
-                      std::string &CaretLine);
-
-  std::string buildFixItInsertionLine(unsigned LineNo,
-                                      const SourceColumnMap &map,
-                                      ArrayRef<FixItHint> Hints);
-  void emitParseableFixits(ArrayRef<FixItHint> Hints);
+  void emitParseableFixits(ArrayRef<FixItHint> Hints, const SourceManager &SM);
 };
 
 } // end namespace clang

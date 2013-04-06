@@ -12,9 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Lex/PreprocessorLexer.h"
-#include "clang/Lex/Preprocessor.h"
-#include "clang/Lex/LexDiagnostic.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Lex/LexDiagnostic.h"
+#include "clang/Lex/Preprocessor.h"
 using namespace clang;
 
 void PreprocessorLexer::anchor() { }
@@ -27,7 +27,7 @@ PreprocessorLexer::PreprocessorLexer(Preprocessor *pp, FileID fid)
     InitialNumSLocEntries = pp->getSourceManager().local_sloc_entry_size();
 }
 
-/// LexIncludeFilename - After the preprocessor has parsed a #include, lex and
+/// \brief After the preprocessor has parsed a \#include, lex and
 /// (potentially) macro expand the filename.
 void PreprocessorLexer::LexIncludeFilename(Token &FilenameTok) {
   assert(ParsingPreprocessorDirective &&

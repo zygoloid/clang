@@ -1,4 +1,4 @@
-//===--- TransAutoreleasePool.cpp - Tranformations to ARC mode ------------===//
+//===--- TransAutoreleasePool.cpp - Transformations to ARC mode -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -29,8 +29,9 @@
 
 #include "Transforms.h"
 #include "Internals.h"
-#include "clang/Sema/SemaDiagnostic.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Sema/SemaDiagnostic.h"
 #include <map>
 
 using namespace clang;
@@ -75,7 +76,7 @@ public:
                                                  &pass.Ctx.Idents.get("drain"));
   }
 
-  void transformBody(Stmt *body) {
+  void transformBody(Stmt *body, Decl *ParentD) {
     Body = body;
     TraverseStmt(body);
   }

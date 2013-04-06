@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SimpleConstraintManager.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/APSIntType.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ExprEngine.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramState.h"
 
@@ -23,7 +24,7 @@ namespace ento {
 SimpleConstraintManager::~SimpleConstraintManager() {}
 
 bool SimpleConstraintManager::canReasonAbout(SVal X) const {
-  nonloc::SymbolVal *SymVal = dyn_cast<nonloc::SymbolVal>(&X);
+  Optional<nonloc::SymbolVal> SymVal = X.getAs<nonloc::SymbolVal>();
   if (SymVal && SymVal->isExpression()) {
     const SymExpr *SE = SymVal->getSymbol();
 
@@ -48,6 +49,16 @@ bool SimpleConstraintManager::canReasonAbout(SVal X) const {
       }
     }
 
+    if (const SymSymExpr *SSE = dyn_cast<SymSymExpr>(SE)) {
+      if (BinaryOperator::isComparisonOp(SSE->getOpcode())) {
+        // We handle Loc <> Loc comparisons, but not (yet) NonLoc <> NonLoc.
+        if (Loc::isLocType(SSE->getLHS()->getType())) {
+          assert(Loc::isLocType(SSE->getRHS()->getType()));
+          return true;
+        }
+      }
+    }
+
     return false;
   }
 
@@ -57,23 +68,21 @@ bool SimpleConstraintManager::canReasonAbout(SVal X) const {
 ProgramStateRef SimpleConstraintManager::assume(ProgramStateRef state,
                                                DefinedSVal Cond,
                                                bool Assumption) {
-  if (isa<NonLoc>(Cond))
-    return assume(state, cast<NonLoc>(Cond), Assumption);
-  else
-    return assume(state, cast<Loc>(Cond), Assumption);
+  if (Optional<NonLoc> NV = Cond.getAs<NonLoc>())
+    return assume(state, *NV, Assumption);
+  return assume(state, Cond.castAs<Loc>(), Assumption);
 }
 
 ProgramStateRef SimpleConstraintManager::assume(ProgramStateRef state, Loc cond,
                                                bool assumption) {
   state = assumeAux(state, cond, assumption);
-  return SU.processAssume(state, cond, assumption);
+  if (NotifyAssumeClients && SU)
+    return SU->processAssume(state, cond, assumption);
+  return state;
 }
 
 ProgramStateRef SimpleConstraintManager::assumeAux(ProgramStateRef state,
                                                   Loc Cond, bool Assumption) {
-
-  BasicValueFactory &BasicVals = state->getBasicVals();
-
   switch (Cond.getSubKind()) {
   default:
     assert (false && "'Assume' not implemented for this Loc.");
@@ -82,13 +91,13 @@ ProgramStateRef SimpleConstraintManager::assumeAux(ProgramStateRef state,
   case loc::MemRegionKind: {
     // FIXME: Should this go into the storemanager?
 
-    const MemRegion *R = cast<loc::MemRegionVal>(Cond).getRegion();
+    const MemRegion *R = Cond.castAs<loc::MemRegionVal>().getRegion();
     const SubRegion *SubR = dyn_cast<SubRegion>(R);
 
     while (SubR) {
       // FIXME: now we only find the first symbolic region.
       if (const SymbolicRegion *SymR = dyn_cast<SymbolicRegion>(SubR)) {
-        const llvm::APSInt &zero = BasicVals.getZeroWithPtrWidth();
+        const llvm::APSInt &zero = getBasicVals().getZeroWithPtrWidth();
         if (Assumption)
           return assumeSymNE(state, SymR->getSymbol(), zero, zero);
         else
@@ -104,7 +113,7 @@ ProgramStateRef SimpleConstraintManager::assumeAux(ProgramStateRef state,
     return Assumption ? state : NULL;
 
   case loc::ConcreteIntKind: {
-    bool b = cast<loc::ConcreteInt>(Cond).getValue() != 0;
+    bool b = Cond.castAs<loc::ConcreteInt>().getValue() != 0;
     bool isFeasible = b ? Assumption : !Assumption;
     return isFeasible ? state : NULL;
   }
@@ -115,31 +124,23 @@ ProgramStateRef SimpleConstraintManager::assume(ProgramStateRef state,
                                                NonLoc cond,
                                                bool assumption) {
   state = assumeAux(state, cond, assumption);
-  return SU.processAssume(state, cond, assumption);
-}
-
-static BinaryOperator::Opcode NegateComparison(BinaryOperator::Opcode op) {
-  // FIXME: This should probably be part of BinaryOperator, since this isn't
-  // the only place it's used. (This code was copied from SimpleSValBuilder.cpp.)
-  switch (op) {
-  default:
-    llvm_unreachable("Invalid opcode.");
-  case BO_LT: return BO_GE;
-  case BO_GT: return BO_LE;
-  case BO_LE: return BO_GT;
-  case BO_GE: return BO_LT;
-  case BO_EQ: return BO_NE;
-  case BO_NE: return BO_EQ;
-  }
+  if (NotifyAssumeClients && SU)
+    return SU->processAssume(state, cond, assumption);
+  return state;
 }
 
 
-ProgramStateRef SimpleConstraintManager::assumeAuxForSymbol(
-                                              ProgramStateRef State,
-                                              SymbolRef Sym,
-                                              bool Assumption) {
-  QualType T =  State->getSymbolManager().getType(Sym);
-  const llvm::APSInt &zero = State->getBasicVals().getValue(0, T);
+ProgramStateRef
+SimpleConstraintManager::assumeAuxForSymbol(ProgramStateRef State,
+                                            SymbolRef Sym, bool Assumption) {
+  BasicValueFactory &BVF = getBasicVals();
+  QualType T = Sym->getType();
+
+  // None of the constraint solvers currently support non-integer types.
+  if (!T->isIntegerType())
+    return State;
+
+  const llvm::APSInt &zero = BVF.getValue(0, T);
   if (Assumption)
     return assumeSymNE(State, Sym, zero, zero);
   else
@@ -158,15 +159,12 @@ ProgramStateRef SimpleConstraintManager::assumeAux(ProgramStateRef state,
     return assumeAuxForSymbol(state, sym, Assumption);
   }
 
-  BasicValueFactory &BasicVals = state->getBasicVals();
-  SymbolManager &SymMgr = state->getSymbolManager();
-
   switch (Cond.getSubKind()) {
   default:
     llvm_unreachable("'Assume' not implemented for this NonLoc");
 
   case nonloc::SymbolValKind: {
-    nonloc::SymbolVal& SV = cast<nonloc::SymbolVal>(Cond);
+    nonloc::SymbolVal SV = Cond.castAs<nonloc::SymbolVal>();
     SymbolRef sym = SV.getSymbol();
     assert(sym);
 
@@ -175,67 +173,73 @@ ProgramStateRef SimpleConstraintManager::assumeAux(ProgramStateRef state,
       return assumeAuxForSymbol(state, sym, Assumption);
 
     // Handle symbolic expression.
-    } else {
+    } else if (const SymIntExpr *SE = dyn_cast<SymIntExpr>(sym)) {
       // We can only simplify expressions whose RHS is an integer.
-      const SymIntExpr *SE = dyn_cast<SymIntExpr>(sym);
-      if (!SE)
-        return assumeAuxForSymbol(state, sym, Assumption);
 
       BinaryOperator::Opcode op = SE->getOpcode();
-      // Implicitly compare non-comparison expressions to 0.
-      if (!BinaryOperator::isComparisonOp(op)) {
-        QualType T = SymMgr.getType(SE);
-        const llvm::APSInt &zero = BasicVals.getValue(0, T);
-        op = (Assumption ? BO_NE : BO_EQ);
-        return assumeSymRel(state, SE, op, zero);
-      }
-      // From here on out, op is the real comparison we'll be testing.
-      if (!Assumption)
-        op = NegateComparison(op);
+      if (BinaryOperator::isComparisonOp(op)) {
+        if (!Assumption)
+          op = BinaryOperator::negateComparisonOp(op);
 
-      return assumeSymRel(state, SE->getLHS(), op, SE->getRHS());
+        return assumeSymRel(state, SE->getLHS(), op, SE->getRHS());
+      }
+
+    } else if (const SymSymExpr *SSE = dyn_cast<SymSymExpr>(sym)) {
+      // Translate "a != b" to "(b - a) != 0".
+      // We invert the order of the operands as a heuristic for how loop
+      // conditions are usually written ("begin != end") as compared to length
+      // calculations ("end - begin"). The more correct thing to do would be to
+      // canonicalize "a - b" and "b - a", which would allow us to treat
+      // "a != b" and "b != a" the same.
+      SymbolManager &SymMgr = getSymbolManager();
+      BinaryOperator::Opcode Op = SSE->getOpcode();
+      assert(BinaryOperator::isComparisonOp(Op));
+
+      // For now, we only support comparing pointers.
+      assert(Loc::isLocType(SSE->getLHS()->getType()));
+      assert(Loc::isLocType(SSE->getRHS()->getType()));
+      QualType DiffTy = SymMgr.getContext().getPointerDiffType();
+      SymbolRef Subtraction = SymMgr.getSymSymExpr(SSE->getRHS(), BO_Sub,
+                                                   SSE->getLHS(), DiffTy);
+
+      const llvm::APSInt &Zero = getBasicVals().getValue(0, DiffTy);
+      Op = BinaryOperator::reverseComparisonOp(Op);
+      if (!Assumption)
+        Op = BinaryOperator::negateComparisonOp(Op);
+      return assumeSymRel(state, Subtraction, Op, Zero);
     }
+
+    // If we get here, there's nothing else we can do but treat the symbol as
+    // opaque.
+    return assumeAuxForSymbol(state, sym, Assumption);
   }
 
   case nonloc::ConcreteIntKind: {
-    bool b = cast<nonloc::ConcreteInt>(Cond).getValue() != 0;
+    bool b = Cond.castAs<nonloc::ConcreteInt>().getValue() != 0;
     bool isFeasible = b ? Assumption : !Assumption;
     return isFeasible ? state : NULL;
   }
 
   case nonloc::LocAsIntegerKind:
-    return assumeAux(state, cast<nonloc::LocAsInteger>(Cond).getLoc(),
+    return assumeAux(state, Cond.castAs<nonloc::LocAsInteger>().getLoc(),
                      Assumption);
   } // end switch
 }
 
-static llvm::APSInt computeAdjustment(const SymExpr *LHS,
-                                      SymbolRef &Sym) {
-  llvm::APSInt DefaultAdjustment;
-  DefaultAdjustment = 0;
+static void computeAdjustment(SymbolRef &Sym, llvm::APSInt &Adjustment) {
+  // Is it a "($sym+constant1)" expression?
+  if (const SymIntExpr *SE = dyn_cast<SymIntExpr>(Sym)) {
+    BinaryOperator::Opcode Op = SE->getOpcode();
+    if (Op == BO_Add || Op == BO_Sub) {
+      Sym = SE->getLHS();
+      Adjustment = APSIntType(Adjustment).convert(SE->getRHS());
 
-  // First check if the LHS is a simple symbol reference.
-  if (isa<SymbolData>(LHS))
-    return DefaultAdjustment;
-
-  // Next, see if it's a "($sym+constant1)" expression.
-  const SymIntExpr *SE = dyn_cast<SymIntExpr>(LHS);
-
-  // We cannot simplify "($sym1+$sym2)".
-  if (!SE)
-    return DefaultAdjustment;
-
-  // Get the constant out of the expression "($sym+constant1)" or
-  // "<expr>+constant1".
-  Sym = SE->getLHS();
-  switch (SE->getOpcode()) {
-  case BO_Add:
-    return SE->getRHS();
-  case BO_Sub:
-    return -SE->getRHS();
-  default:
-    // We cannot simplify non-additive operators.
-    return DefaultAdjustment;
+      // Don't forget to negate the adjustment if it's being subtracted.
+      // This should happen /after/ promotion, in case the value being
+      // subtracted is, say, CHAR_MIN, and the promoted type is 'int'.
+      if (Op == BO_Sub)
+        Adjustment = -Adjustment;
+    }
   }
 }
 
@@ -246,6 +250,10 @@ ProgramStateRef SimpleConstraintManager::assumeSymRel(ProgramStateRef state,
   assert(BinaryOperator::isComparisonOp(op) &&
          "Non-comparison ops should be rewritten as comparisons to zero.");
 
+  // Get the type used for calculating wraparound.
+  BasicValueFactory &BVF = getBasicVals();
+  APSIntType WraparoundType = BVF.getAPSIntType(LHS->getType());
+
   // We only handle simple comparisons of the form "$sym == constant"
   // or "($sym+constant1) == constant2".
   // The adjustment is "constant1" in the above expression. It's used to
@@ -254,33 +262,21 @@ ProgramStateRef SimpleConstraintManager::assumeSymRel(ProgramStateRef state,
   // in modular arithmetic is [0, 1] U [UINT_MAX-1, UINT_MAX]. It's up to
   // the subclasses of SimpleConstraintManager to handle the adjustment.
   SymbolRef Sym = LHS;
-  llvm::APSInt Adjustment = computeAdjustment(LHS, Sym);
+  llvm::APSInt Adjustment = WraparoundType.getZeroValue();
+  computeAdjustment(Sym, Adjustment);
 
-  // FIXME: This next section is a hack. It silently converts the integers to
-  // be of the same type as the symbol, which is not always correct. Really the
-  // comparisons should be performed using the Int's type, then mapped back to
-  // the symbol's range of values.
-  ProgramStateManager &StateMgr = state->getStateManager();
-  ASTContext &Ctx = StateMgr.getContext();
+  // Convert the right-hand side integer as necessary.
+  APSIntType ComparisonType = std::max(WraparoundType, APSIntType(Int));
+  llvm::APSInt ConvertedInt = ComparisonType.convert(Int);
 
-  QualType T = Sym->getType(Ctx);
-  assert(T->isIntegerType() || Loc::isLocType(T));
-  unsigned bitwidth = Ctx.getTypeSize(T);
-  bool isSymUnsigned 
-    = T->isUnsignedIntegerOrEnumerationType() || Loc::isLocType(T);
-
-  // Convert the adjustment.
-  Adjustment.setIsUnsigned(isSymUnsigned);
-  Adjustment = Adjustment.extOrTrunc(bitwidth);
-
-  // Convert the right-hand side integer.
-  llvm::APSInt ConvertedInt(Int, isSymUnsigned);
-  ConvertedInt = ConvertedInt.extOrTrunc(bitwidth);
+  // Prefer unsigned comparisons.
+  if (ComparisonType.getBitWidth() == WraparoundType.getBitWidth() &&
+      ComparisonType.isUnsigned() && !WraparoundType.isUnsigned())
+    Adjustment.setIsSigned(false);
 
   switch (op) {
   default:
-    // No logic yet for other operators.  assume the constraint is feasible.
-    return state;
+    llvm_unreachable("invalid operation not caught by assertion above");
 
   case BO_EQ:
     return assumeSymEQ(state, Sym, ConvertedInt, Adjustment);

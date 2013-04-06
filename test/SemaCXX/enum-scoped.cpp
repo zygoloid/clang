@@ -245,3 +245,24 @@ namespace test10 {
   int m = g<int>();
   int n = g<short>(); // expected-note {{here}}
 }
+
+namespace pr13128 {
+  // This should compile cleanly
+  class C {
+    enum class E { C };
+  };
+}
+
+namespace PR15633 {
+  template<typename T> struct A {
+    struct B {
+      enum class E : T;
+      enum class E2 : T;
+    };
+  };
+  template<typename T> enum class A<T>::B::E { e };
+  template class A<int>;
+
+  struct B { enum class E; };
+  template<typename T> enum class B::E { e }; // expected-error {{enumeration cannot be a template}}
+}

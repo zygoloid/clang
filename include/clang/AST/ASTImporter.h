@@ -48,6 +48,9 @@ namespace clang {
 
     /// \brief Whether to perform a minimal import.
     bool Minimal;
+
+    /// \brief Whether the last diagnostic came from the "from" context.
+    bool LastDiagFromFrom;
     
     /// \brief Mapping from the already-imported types in the "from" context
     /// to the corresponding types in the "to" context.
@@ -271,7 +274,8 @@ namespace clang {
     
     /// \brief Determine whether the given types are structurally
     /// equivalent.
-    bool IsStructurallyEquivalent(QualType From, QualType To);    
+    bool IsStructurallyEquivalent(QualType From, QualType To,
+                                  bool Complain = true);
   };
 }
 

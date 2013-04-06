@@ -12,11 +12,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "ClangSACheckers.h"
-#include "clang/Analysis/AnalysisContext.h"
 #include "clang/AST/StmtVisitor.h"
+#include "clang/Analysis/AnalysisContext.h"
 #include "clang/Basic/TargetInfo.h"
-#include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
+#include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -31,17 +31,11 @@ static bool isArc4RandomAvailable(const ASTContext &Ctx) {
          T.getOS() == llvm::Triple::FreeBSD ||
          T.getOS() == llvm::Triple::NetBSD ||
          T.getOS() == llvm::Triple::OpenBSD ||
+         T.getOS() == llvm::Triple::Bitrig ||
          T.getOS() == llvm::Triple::DragonFly;
 }
 
 namespace {
-struct DefaultBool {
-  bool val;
-  DefaultBool() : val(false) {}
-  operator bool() const { return val; }
-  DefaultBool &operator=(bool b) { val = b; return *this; }
-};
-  
 struct ChecksFilter {
   DefaultBool check_gets;
   DefaultBool check_getpw;
@@ -269,6 +263,7 @@ void WalkAST::checkLoopConditionForFloat(const ForStmt *FS) {
 
   // Emit the error.  First figure out which DeclRefExpr in the condition
   // referenced the compared variable.
+  assert(drInc->getDecl());
   const DeclRefExpr *drCond = vdLHS == drInc->getDecl() ? drLHS : drRHS;
 
   SmallVector<SourceRange, 2> ranges;

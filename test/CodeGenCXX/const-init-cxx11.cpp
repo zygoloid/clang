@@ -49,6 +49,17 @@ namespace StructUnion {
 
   // CHECK: @_ZN11StructUnion1fE = global {{.*}} { i32 5 }
   D f;
+
+  union E {
+    int a;
+    void *b = &f;
+  };
+
+  // CHECK: @_ZN11StructUnion1gE = global {{.*}} @_ZN11StructUnion1fE
+  E g;
+
+  // CHECK: @_ZN11StructUnion1hE = global {{.*}} @_ZN11StructUnion1fE
+  E h = E();
 }
 
 namespace BaseClass {
@@ -110,6 +121,13 @@ namespace Array {
   };
   // CHECK: @_ZN5Array1eE = constant {{.*}} { [4 x i8] c"foo\00", [4 x i8] c"x\00\00\00" }
   extern constexpr E e = E();
+
+  // PR13290
+  struct F { constexpr F() : n(4) {} int n; };
+  // CHECK: @_ZN5Array2f1E = global {{.*}} zeroinitializer
+  F f1[1][1][0] = { };
+  // CHECK: @_ZN5Array2f2E = global {{.* i32 4 .* i32 4 .* i32 4 .* i32 4 .* i32 4 .* i32 4 .* i32 4 .* i32 4}}
+  F f2[2][2][2] = { };
 }
 
 namespace MemberPtr {
@@ -298,6 +316,20 @@ namespace VirtualMembers {
   static nsMemoryImpl sGlobalMemory;
 }
 
+namespace PR13273 {
+  struct U {
+    int t;
+    U() = default;
+  };
+
+  struct S : U {
+    S() = default;
+  };
+
+  // CHECK: @_ZN7PR132731sE = {{.*}} zeroinitializer
+  extern const S s {};
+}
+
 // Constant initialization tests go before this point,
 // dynamic initialization tests go after.
 
@@ -400,11 +432,7 @@ namespace InitFromConst {
     // CHECK: call void @_ZN13InitFromConst7consumeIRKNS_1SEEEvT_(%"struct.InitFromConst::S"* @_ZN13InitFromConstL1sE)
     consume<const S&>(s);
 
-    // FIXME CHECK-NOT: call void @_ZN13InitFromConst7consumeIRKNS_1SEEEvT_(%"struct.InitFromConst::S"* @_ZN13InitFromConstL1sE)
-    // There's no lvalue-to-rvalue conversion here, so 'r' is odr-used, and
-    // we're permitted to emit a load of it. This seems likely to be a defect
-    // in the standard. If we start emitting a direct reference to 's', update
-    // this test.
+    // CHECK: call void @_ZN13InitFromConst7consumeIRKNS_1SEEEvT_(%"struct.InitFromConst::S"* @_ZN13InitFromConstL1sE)
     consume<const S&>(r);
 
     // CHECK: call void @_ZN13InitFromConst7consumeIPKNS_1SEEEvT_(%"struct.InitFromConst::S"* @_ZN13InitFromConstL1sE)

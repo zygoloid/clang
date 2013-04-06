@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple i686-linux -Wno-string-plus-int -fsyntax-only -verify -std=c++11 -pedantic %s -Wno-comment
+// RUN: %clang_cc1 -triple i686-linux -Wno-string-plus-int -fsyntax-only -fcxx-exceptions -verify -std=c++11 -pedantic %s -Wno-comment
 
 namespace StaticAssertFoldTest {
 
@@ -494,18 +494,45 @@ struct ArrayRVal {
 };
 static_assert(ArrayRVal().elems[3].f() == 0, "");
 
+constexpr int selfref[2][2][2] = {
+  selfref[1][1][1] + 1, selfref[0][0][0] + 1,
+  selfref[1][0][1] + 1, selfref[0][1][0] + 1,
+  selfref[1][0][0] + 1, selfref[0][1][1] + 1 };
+static_assert(selfref[0][0][0] == 1, "");
+static_assert(selfref[0][0][1] == 2, "");
+static_assert(selfref[0][1][0] == 1, "");
+static_assert(selfref[0][1][1] == 2, "");
+static_assert(selfref[1][0][0] == 1, "");
+static_assert(selfref[1][0][1] == 3, "");
+static_assert(selfref[1][1][0] == 0, "");
+static_assert(selfref[1][1][1] == 0, "");
+
+struct TrivialDefCtor { int n; };
+typedef TrivialDefCtor TDCArray[2][2];
+static_assert(TDCArray{}[1][1].n == 0, "");
+
+struct NonAggregateTDC : TrivialDefCtor {};
+typedef NonAggregateTDC NATDCArray[2][2];
+static_assert(NATDCArray{}[1][1].n == 0, "");
+
 }
 
 namespace DependentValues {
 
 struct I { int n; typedef I V[10]; };
 I::V x, y;
-template<bool B> struct S {
+int g();
+template<bool B, typename T> struct S : T {
   int k;
   void f() {
     I::V &cells = B ? x : y;
     I &i = cells[k];
     switch (i.n) {}
+
+    // FIXME: We should be able to diagnose this.
+    constexpr int n = g();
+
+    constexpr int m = this->g(); // ok, could be constexpr
   }
 };
 
@@ -689,10 +716,16 @@ static_assert(&ok2 == pok2, "");
 static_assert((Base2*)(Derived*)(Base*)pb1 == pok2, "");
 static_assert((Derived*)(Base*)pb1 == (Derived*)pok2, "");
 
-constexpr Base *nullB = 42 - 6 * 7;
+constexpr Base *nullB = 42 - 6 * 7; // expected-warning {{expression which evaluates to zero treated as a null pointer constant of type 'Class::Base *const'}}
 static_assert((Bottom*)nullB == 0, "");
 static_assert((Derived*)nullB == 0, "");
 static_assert((void*)(Bottom*)nullB == (void*)(Derived*)nullB, "");
+Base * nullB2 = '\0'; // expected-warning {{expression which evaluates to zero treated as a null pointer constant of type 'Class::Base *'}}
+Base * nullB3 = (0);
+// We suppress the warning in unevaluated contexts to workaround some gtest
+// behavior. Once this becomes an error this isn't a problem anymore.
+static_assert(nullB == (1 - 1), "");
+
 
 namespace ConversionOperators {
 
@@ -713,6 +746,15 @@ constexpr bool check(T a, T b) { return a == b.k; }
 
 static_assert(S(5) == 11, "");
 static_assert(check(S(5), 11), "");
+
+namespace PR14171 {
+
+struct X {
+  constexpr (operator int)() { return 0; }
+};
+static_assert(X() == 0, "");
+
+}
 
 }
 
@@ -1111,8 +1153,8 @@ namespace ConvertedConstantExpr {
 namespace IndirectField {
   struct S {
     struct { // expected-warning {{GNU extension}}
-      union {
-        struct { // expected-warning {{GNU extension}}
+      union { // expected-warning {{declared in an anonymous struct}}
+        struct { // expected-warning {{GNU extension}} expected-warning {{declared in an anonymous union}}
           int a;
           int b;
         };
@@ -1213,6 +1255,17 @@ namespace RecursiveOpaqueExpr {
 
   constexpr int arr2[] = { 1, 0, 0, 3, 0, 2, 0, 4, 0, 5 };
   static_assert(LastNonzero(begin(arr2), end(arr2)) == 5, "");
+
+  constexpr int arr3[] = {
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+  static_assert(LastNonzero(begin(arr3), end(arr3)) == 2, "");
 }
 
 namespace VLASizeof {
@@ -1264,4 +1317,148 @@ namespace NamespaceAlias {
     namespace NS = NamespaceAlias; // expected-error {{not allowed in constexpr function}}
     return &NS::f != nullptr;
   }
+}
+
+// Constructors can be implicitly constexpr, even for a non-literal type.
+namespace ImplicitConstexpr {
+  struct Q { Q() = default; Q(const Q&) = default; Q(Q&&) = default; ~Q(); }; // expected-note 3{{here}}
+  struct R { constexpr R() noexcept; constexpr R(const R&) noexcept; constexpr R(R&&) noexcept; ~R() noexcept; };
+  struct S { R r; }; // expected-note 3{{here}}
+  struct T { T(const T&) noexcept; T(T &&) noexcept; ~T() noexcept; };
+  struct U { T t; }; // expected-note 3{{here}}
+  static_assert(!__is_literal_type(Q), "");
+  static_assert(!__is_literal_type(R), "");
+  static_assert(!__is_literal_type(S), "");
+  static_assert(!__is_literal_type(T), "");
+  static_assert(!__is_literal_type(U), "");
+  struct Test {
+    friend Q::Q() noexcept; // expected-error {{follows constexpr}}
+    friend Q::Q(Q&&) noexcept; // expected-error {{follows constexpr}}
+    friend Q::Q(const Q&) noexcept; // expected-error {{follows constexpr}}
+    friend S::S() noexcept; // expected-error {{follows constexpr}}
+    friend S::S(S&&) noexcept; // expected-error {{follows constexpr}}
+    friend S::S(const S&) noexcept; // expected-error {{follows constexpr}}
+    friend constexpr U::U() noexcept; // expected-error {{follows non-constexpr}}
+    friend constexpr U::U(U&&) noexcept; // expected-error {{follows non-constexpr}}
+    friend constexpr U::U(const U&) noexcept; // expected-error {{follows non-constexpr}}
+  };
+}
+
+// Indirectly test that an implicit lvalue to xvalue conversion performed for
+// an NRVO move operation isn't implemented as CK_LValueToRValue.
+namespace PR12826 {
+  struct Foo {};
+  constexpr Foo id(Foo x) { return x; }
+  constexpr Foo res(id(Foo()));
+}
+
+namespace PR13273 {
+  struct U {
+    int t;
+    U() = default;
+  };
+
+  struct S : U {
+    S() = default;
+  };
+
+  // S's default constructor isn't constexpr, because U's default constructor
+  // doesn't initialize 't', but it's trivial, so value-initialization doesn't
+  // actually call it.
+  static_assert(S{}.t == 0, "");
+}
+
+namespace PR12670 {
+  struct S {
+    constexpr S(int a0) : m(a0) {}
+    constexpr S() : m(6) {}
+    int m;
+  };
+  constexpr S x[3] = { {4}, 5 };
+  static_assert(x[0].m == 4, "");
+  static_assert(x[1].m == 5, "");
+  static_assert(x[2].m == 6, "");
+}
+
+// Indirectly test that an implicit lvalue-to-rvalue conversion is performed
+// when a conditional operator has one argument of type void and where the other
+// is a glvalue of class type.
+namespace ConditionalLValToRVal {
+  struct A {
+    constexpr A(int a) : v(a) {}
+    int v;
+  };
+
+  constexpr A f(const A &a) {
+    return a.v == 0 ? throw a : a;
+  }
+
+  constexpr A a(4);
+  static_assert(f(a).v == 4, "");
+}
+
+namespace TLS {
+  __thread int n;
+  int m;
+
+  constexpr bool b = &n == &n;
+
+  constexpr int *p = &n; // expected-error{{constexpr variable 'p' must be initialized by a constant expression}}
+
+  constexpr int *f() { return &n; }
+  constexpr int *q = f(); // expected-error{{constexpr variable 'q' must be initialized by a constant expression}}
+  constexpr bool c = f() == f();
+
+  constexpr int *g() { return &m; }
+  constexpr int *r = g();
+}
+
+namespace Void {
+  constexpr void f() { return; } // expected-error{{constexpr function's return type 'void' is not a literal type}}
+
+  void assert_failed(const char *msg, const char *file, int line); // expected-note {{declared here}}
+#define ASSERT(expr) ((expr) ? static_cast<void>(0) : assert_failed(#expr, __FILE__, __LINE__))
+  template<typename T, size_t S>
+  constexpr T get(T (&a)[S], size_t k) {
+    return ASSERT(k > 0 && k < S), a[k]; // expected-note{{non-constexpr function 'assert_failed'}}
+  }
+#undef ASSERT
+  template int get(int (&a)[4], size_t);
+  constexpr int arr[] = { 4, 1, 2, 3, 4 };
+  static_assert(get(arr, 1) == 1, "");
+  static_assert(get(arr, 4) == 4, "");
+  static_assert(get(arr, 0) == 4, ""); // expected-error{{not an integral constant expression}} \
+  // expected-note{{in call to 'get(arr, 0)'}}
+}
+
+namespace std { struct type_info; }
+
+namespace TypeId {
+  struct A { virtual ~A(); };
+  A f();
+  A &g();
+  constexpr auto &x = typeid(f());
+  constexpr auto &y = typeid(g()); // expected-error{{constant expression}} \
+  // expected-note{{typeid applied to expression of polymorphic type 'TypeId::A' is not allowed in a constant expression}}
+}
+
+namespace PR14203 {
+  struct duration {
+    constexpr duration() {}
+    constexpr operator int() const { return 0; }
+  };
+  template<typename T> void f() {
+    // If we want to evaluate this at the point of the template definition, we
+    // need to trigger the implicit definition of the move constructor at that
+    // point.
+    // FIXME: C++ does not permit us to implicitly define it at the appropriate
+    // times, since it is only allowed to be implicitly defined when it is
+    // odr-used.
+    constexpr duration d = duration();
+  }
+  // FIXME: It's unclear whether this is valid. On the one hand, we're not
+  // allowed to generate a move constructor. On the other hand, if we did,
+  // this would be a constant expression. For now, we generate a move
+  // constructor here.
+  int n = sizeof(short{duration(duration())});
 }

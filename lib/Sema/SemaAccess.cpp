@@ -12,9 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Sema/SemaInternal.h"
-#include "clang/Sema/DelayedDiagnostic.h"
-#include "clang/Sema/Initialization.h"
-#include "clang/Sema/Lookup.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/DeclCXX.h"
@@ -22,6 +19,9 @@
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DependentDiagnostic.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/Sema/DelayedDiagnostic.h"
+#include "clang/Sema/Initialization.h"
+#include "clang/Sema/Lookup.h"
 
 using namespace clang;
 using namespace sema;
@@ -97,14 +97,19 @@ struct EffectiveContext {
     // functions (which can gain privileges through friendship), but we
     // take that as an oversight.
     while (true) {
+      // We want to add canonical declarations to the EC lists for
+      // simplicity of checking, but we need to walk up through the
+      // actual current DC chain.  Otherwise, something like a local
+      // extern or friend which happens to be the canonical
+      // declaration will really mess us up.
+
       if (isa<CXXRecordDecl>(DC)) {
-        CXXRecordDecl *Record = cast<CXXRecordDecl>(DC)->getCanonicalDecl();
-        Records.push_back(Record);
+        CXXRecordDecl *Record = cast<CXXRecordDecl>(DC);
+        Records.push_back(Record->getCanonicalDecl());
         DC = Record->getDeclContext();
       } else if (isa<FunctionDecl>(DC)) {
-        FunctionDecl *Function = cast<FunctionDecl>(DC)->getCanonicalDecl();
-        Functions.push_back(Function);
-        
+        FunctionDecl *Function = cast<FunctionDecl>(DC);
+        Functions.push_back(Function->getCanonicalDecl());
         if (Function->getFriendObjectKind())
           DC = Function->getLexicalDeclContext();
         else
@@ -152,7 +157,8 @@ struct AccessTarget : public AccessedEntity {
                CXXRecordDecl *NamingClass,
                DeclAccessPair FoundDecl,
                QualType BaseObjectType)
-    : AccessedEntity(Context, Member, NamingClass, FoundDecl, BaseObjectType) {
+    : AccessedEntity(Context.getDiagAllocator(), Member, NamingClass,
+                     FoundDecl, BaseObjectType) {
     initialize();
   }
 
@@ -161,7 +167,8 @@ struct AccessTarget : public AccessedEntity {
                CXXRecordDecl *BaseClass,
                CXXRecordDecl *DerivedClass,
                AccessSpecifier Access)
-    : AccessedEntity(Context, Base, BaseClass, DerivedClass, Access) {
+    : AccessedEntity(Context.getDiagAllocator(), Base, BaseClass, DerivedClass,
+                     Access) {
     initialize();
   }
 
@@ -208,6 +215,15 @@ struct AccessTarget : public AccessedEntity {
 
   const CXXRecordDecl *getDeclaringClass() const {
     return DeclaringClass;
+  }
+
+  /// The "effective" naming class is the canonical non-anonymous
+  /// class containing the actual naming class.
+  const CXXRecordDecl *getEffectiveNamingClass() const {
+    const CXXRecordDecl *namingClass = getNamingClass();
+    while (namingClass->isAnonymousStructOrUnion())
+      namingClass = cast<CXXRecordDecl>(namingClass->getParent());
+    return namingClass->getCanonicalDecl();
   }
 
 private:
@@ -1016,8 +1032,7 @@ static bool TryDiagnoseProtectedAccess(Sema &S, const EffectiveContext &EC,
 
   assert(Target.isMemberAccess());
 
-  const CXXRecordDecl *NamingClass = Target.getNamingClass();
-  NamingClass = NamingClass->getCanonicalDecl();
+  const CXXRecordDecl *NamingClass = Target.getEffectiveNamingClass();
 
   for (EffectiveContext::record_iterator
          I = EC.Records.begin(), E = EC.Records.end(); I != E; ++I) {
@@ -1082,129 +1097,173 @@ static bool TryDiagnoseProtectedAccess(Sema &S, const EffectiveContext &EC,
   return false;
 }
 
+/// We are unable to access a given declaration due to its direct
+/// access control;  diagnose that.
+static void diagnoseBadDirectAccess(Sema &S,
+                                    const EffectiveContext &EC,
+                                    AccessTarget &entity) {
+  assert(entity.isMemberAccess());
+  NamedDecl *D = entity.getTargetDecl();
+
+  if (D->getAccess() == AS_protected &&
+      TryDiagnoseProtectedAccess(S, EC, entity))
+    return;
+
+  // Find an original declaration.
+  while (D->isOutOfLine()) {
+    NamedDecl *PrevDecl = 0;
+    if (VarDecl *VD = dyn_cast<VarDecl>(D))
+      PrevDecl = VD->getPreviousDecl();
+    else if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D))
+      PrevDecl = FD->getPreviousDecl();
+    else if (TypedefNameDecl *TND = dyn_cast<TypedefNameDecl>(D))
+      PrevDecl = TND->getPreviousDecl();
+    else if (TagDecl *TD = dyn_cast<TagDecl>(D)) {
+      if (isa<RecordDecl>(D) && cast<RecordDecl>(D)->isInjectedClassName())
+        break;
+      PrevDecl = TD->getPreviousDecl();
+    }
+    if (!PrevDecl) break;
+    D = PrevDecl;
+  }
+
+  CXXRecordDecl *DeclaringClass = FindDeclaringClass(D);
+  Decl *ImmediateChild;
+  if (D->getDeclContext() == DeclaringClass)
+    ImmediateChild = D;
+  else {
+    DeclContext *DC = D->getDeclContext();
+    while (DC->getParent() != DeclaringClass)
+      DC = DC->getParent();
+    ImmediateChild = cast<Decl>(DC);
+  }
+
+  // Check whether there's an AccessSpecDecl preceding this in the
+  // chain of the DeclContext.
+  bool isImplicit = true;
+  for (CXXRecordDecl::decl_iterator
+         I = DeclaringClass->decls_begin(), E = DeclaringClass->decls_end();
+       I != E; ++I) {
+    if (*I == ImmediateChild) break;
+    if (isa<AccessSpecDecl>(*I)) {
+      isImplicit = false;
+      break;
+    }
+  }
+
+  S.Diag(D->getLocation(), diag::note_access_natural)
+    << (unsigned) (D->getAccess() == AS_protected)
+    << isImplicit;
+}
+
 /// Diagnose the path which caused the given declaration or base class
 /// to become inaccessible.
 static void DiagnoseAccessPath(Sema &S,
                                const EffectiveContext &EC,
-                               AccessTarget &Entity) {
-  AccessSpecifier Access = Entity.getAccess();
+                               AccessTarget &entity) {
+  // Save the instance context to preserve invariants.
+  AccessTarget::SavedInstanceContext _ = entity.saveInstanceContext();
 
-  NamedDecl *D = (Entity.isMemberAccess() ? Entity.getTargetDecl() : 0);
-  const CXXRecordDecl *DeclaringClass = Entity.getDeclaringClass();
+  // This basically repeats the main algorithm but keeps some more
+  // information.
 
-  // Easy case: the decl's natural access determined its path access.
-  // We have to check against AS_private here in case Access is AS_none,
-  // indicating a non-public member of a private base class.
-  if (D && (Access == D->getAccess() || D->getAccess() == AS_private)) {
-    switch (HasAccess(S, EC, DeclaringClass, D->getAccess(), Entity)) {
-    case AR_inaccessible: {
-      if (Access == AS_protected &&
-          TryDiagnoseProtectedAccess(S, EC, Entity))
-        return;
+  // The natural access so far.
+  AccessSpecifier accessSoFar = AS_public;
 
-      // Find an original declaration.
-      while (D->isOutOfLine()) {
-        NamedDecl *PrevDecl = 0;
-        if (VarDecl *VD = dyn_cast<VarDecl>(D))
-          PrevDecl = VD->getPreviousDecl();
-        else if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D))
-          PrevDecl = FD->getPreviousDecl();
-        else if (TypedefNameDecl *TND = dyn_cast<TypedefNameDecl>(D))
-          PrevDecl = TND->getPreviousDecl();
-        else if (TagDecl *TD = dyn_cast<TagDecl>(D)) {
-          if (isa<RecordDecl>(D) && cast<RecordDecl>(D)->isInjectedClassName())
-            break;
-          PrevDecl = TD->getPreviousDecl();
-        }
-        if (!PrevDecl) break;
-        D = PrevDecl;
-      }
+  // Check whether we have special rights to the declaring class.
+  if (entity.isMemberAccess()) {
+    NamedDecl *D = entity.getTargetDecl();
+    accessSoFar = D->getAccess();
+    const CXXRecordDecl *declaringClass = entity.getDeclaringClass();
 
-      CXXRecordDecl *DeclaringClass = FindDeclaringClass(D);
-      Decl *ImmediateChild;
-      if (D->getDeclContext() == DeclaringClass)
-        ImmediateChild = D;
-      else {
-        DeclContext *DC = D->getDeclContext();
-        while (DC->getParent() != DeclaringClass)
-          DC = DC->getParent();
-        ImmediateChild = cast<Decl>(DC);
-      }
-      
-      // Check whether there's an AccessSpecDecl preceding this in the
-      // chain of the DeclContext.
-      bool Implicit = true;
-      for (CXXRecordDecl::decl_iterator
-             I = DeclaringClass->decls_begin(), E = DeclaringClass->decls_end();
-           I != E; ++I) {
-        if (*I == ImmediateChild) break;
-        if (isa<AccessSpecDecl>(*I)) {
-          Implicit = false;
-          break;
-        }
-      }
+    switch (HasAccess(S, EC, declaringClass, accessSoFar, entity)) {
+    // If the declaration is accessible when named in its declaring
+    // class, then we must be constrained by the path.
+    case AR_accessible:
+      accessSoFar = AS_public;
+      entity.suppressInstanceContext();
+      break;
 
-      S.Diag(D->getLocation(), diag::note_access_natural)
-        << (unsigned) (Access == AS_protected)
-        << Implicit;
-      return;
-    }
-
-    case AR_accessible: break;
+    case AR_inaccessible:
+      if (accessSoFar == AS_private ||
+          declaringClass == entity.getEffectiveNamingClass())
+        return diagnoseBadDirectAccess(S, EC, entity);
+      break;
 
     case AR_dependent:
-      llvm_unreachable("can't diagnose dependent access failures");
+      llvm_unreachable("cannot diagnose dependent access");
     }
   }
 
-  CXXBasePaths Paths;
-  CXXBasePath &Path = *FindBestPath(S, EC, Entity, AS_public, Paths);
+  CXXBasePaths paths;
+  CXXBasePath &path = *FindBestPath(S, EC, entity, accessSoFar, paths);
+  assert(path.Access != AS_public);
 
-  CXXBasePath::iterator I = Path.end(), E = Path.begin();
-  while (I != E) {
-    --I;
+  CXXBasePath::iterator i = path.end(), e = path.begin();
+  CXXBasePath::iterator constrainingBase = i;
+  while (i != e) {
+    --i;
 
-    const CXXBaseSpecifier *BS = I->Base;
-    AccessSpecifier BaseAccess = BS->getAccessSpecifier();
+    assert(accessSoFar != AS_none && accessSoFar != AS_private);
 
-    // If this is public inheritance, or the derived class is a friend,
-    // skip this step.
-    if (BaseAccess == AS_public)
-      continue;
+    // Is the entity accessible when named in the deriving class, as
+    // modified by the base specifier?
+    const CXXRecordDecl *derivingClass = i->Class->getCanonicalDecl();
+    const CXXBaseSpecifier *base = i->Base;
 
-    switch (GetFriendKind(S, EC, I->Class)) {
-    case AR_accessible: continue;
+    // If the access to this base is worse than the access we have to
+    // the declaration, remember it.
+    AccessSpecifier baseAccess = base->getAccessSpecifier();
+    if (baseAccess > accessSoFar) {
+      constrainingBase = i;
+      accessSoFar = baseAccess;
+    }
+
+    switch (HasAccess(S, EC, derivingClass, accessSoFar, entity)) {
     case AR_inaccessible: break;
+    case AR_accessible:
+      accessSoFar = AS_public;
+      entity.suppressInstanceContext();
+      constrainingBase = 0;
+      break;
     case AR_dependent:
-      llvm_unreachable("can't diagnose dependent access failures");
+      llvm_unreachable("cannot diagnose dependent access");
     }
 
-    // Check whether this base specifier is the tighest point
-    // constraining access.  We have to check against AS_private for
-    // the same reasons as above.
-    if (BaseAccess == AS_private || BaseAccess >= Access) {
-
-      // We're constrained by inheritance, but we want to say
-      // "declared private here" if we're diagnosing a hierarchy
-      // conversion and this is the final step.
-      unsigned diagnostic;
-      if (D) diagnostic = diag::note_access_constrained_by_path;
-      else if (I + 1 == Path.end()) diagnostic = diag::note_access_natural;
-      else diagnostic = diag::note_access_constrained_by_path;
-
-      S.Diag(BS->getSourceRange().getBegin(), diagnostic)
-        << BS->getSourceRange()
-        << (BaseAccess == AS_protected)
-        << (BS->getAccessSpecifierAsWritten() == AS_none);
-      
-      if (D)
-        S.Diag(D->getLocation(), diag::note_field_decl);
-      
-      return;
+    // If this was private inheritance, but we don't have access to
+    // the deriving class, we're done.
+    if (accessSoFar == AS_private) {
+      assert(baseAccess == AS_private);
+      assert(constrainingBase == i);
+      break;
     }
   }
 
-  llvm_unreachable("access not apparently constrained by path");
+  // If we don't have a constraining base, the access failure must be
+  // due to the original declaration.
+  if (constrainingBase == path.end())
+    return diagnoseBadDirectAccess(S, EC, entity);
+
+  // We're constrained by inheritance, but we want to say
+  // "declared private here" if we're diagnosing a hierarchy
+  // conversion and this is the final step.
+  unsigned diagnostic;
+  if (entity.isMemberAccess() ||
+      constrainingBase + 1 != path.end()) {
+    diagnostic = diag::note_access_constrained_by_path;
+  } else {
+    diagnostic = diag::note_access_natural;
+  }
+
+  const CXXBaseSpecifier *base = constrainingBase->Base;
+
+  S.Diag(base->getSourceRange().getBegin(), diagnostic)
+    << base->getSourceRange()
+    << (base->getAccessSpecifier() == AS_protected)
+    << (base->getAccessSpecifierAsWritten() == AS_none);
+
+  if (entity.isMemberAccess())
+    S.Diag(entity.getTargetDecl()->getLocation(), diag::note_field_decl);
 }
 
 static void DiagnoseBadAccess(Sema &S, SourceLocation Loc,
@@ -1266,10 +1325,7 @@ static AccessResult IsAccessible(Sema &S,
                                  const EffectiveContext &EC,
                                  AccessTarget &Entity) {
   // Determine the actual naming class.
-  CXXRecordDecl *NamingClass = Entity.getNamingClass();
-  while (NamingClass->isAnonymousStructOrUnion())
-    NamingClass = cast<CXXRecordDecl>(NamingClass->getParent());
-  NamingClass = NamingClass->getCanonicalDecl();
+  const CXXRecordDecl *NamingClass = Entity.getEffectiveNamingClass();
 
   AccessSpecifier UnprivilegedAccess = Entity.getAccess();
   assert(UnprivilegedAccess != AS_public && "public access not weeded out");
@@ -1310,7 +1366,13 @@ static AccessResult IsAccessible(Sema &S,
     FinalAccess = Target->getAccess();
     switch (HasAccess(S, EC, DeclaringClass, FinalAccess, Entity)) {
     case AR_accessible:
+      // Target is accessible at EC when named in its declaring class.
+      // We can now hill-climb and simply check whether the declaring
+      // class is accessible as a base of the naming class.  This is
+      // equivalent to checking the access of a notional public
+      // member with no instance context.
       FinalAccess = AS_public;
+      Entity.suppressInstanceContext();
       break;
     case AR_inaccessible: break;
     case AR_dependent: return AR_dependent; // see above
@@ -1318,8 +1380,6 @@ static AccessResult IsAccessible(Sema &S,
 
     if (DeclaringClass == NamingClass)
       return (FinalAccess == AS_public ? AR_accessible : AR_inaccessible);
-
-    Entity.suppressInstanceContext();
   } else {
     FinalAccess = AS_public;
   }
@@ -1389,9 +1449,6 @@ static Sema::AccessResult CheckAccess(Sema &S, SourceLocation Loc,
                                       AccessTarget &Entity) {
   // If the access path is public, it's accessible everywhere.
   if (Entity.getAccess() == AS_public)
-    return Sema::AR_accessible;
-
-  if (S.SuppressAccessChecking)
     return Sema::AR_accessible;
 
   // If we're currently parsing a declaration, we may need to delay
@@ -1633,25 +1690,6 @@ Sema::AccessResult Sema::CheckConstructorAccess(SourceLocation UseLoc,
   return CheckAccess(*this, UseLoc, AccessEntity);
 } 
 
-/// Checks direct (i.e. non-inherited) access to an arbitrary class
-/// member.
-Sema::AccessResult Sema::CheckDirectMemberAccess(SourceLocation UseLoc,
-                                                 NamedDecl *Target,
-                                           const PartialDiagnostic &Diag) {
-  AccessSpecifier Access = Target->getAccess();
-  if (!getLangOpts().AccessControl ||
-      Access == AS_public)
-    return AR_accessible;
-
-  CXXRecordDecl *NamingClass = cast<CXXRecordDecl>(Target->getDeclContext());
-  AccessTarget Entity(Context, AccessTarget::Member, NamingClass,
-                      DeclAccessPair::make(Target, Access),
-                      QualType());
-  Entity.setDiag(Diag);
-  return CheckAccess(*this, UseLoc, Entity);
-}
-                                           
-
 /// Checks access to an overloaded operator new or delete.
 Sema::AccessResult Sema::CheckAllocationAccess(SourceLocation OpLoc,
                                                SourceRange PlacementRange,
@@ -1694,6 +1732,44 @@ Sema::AccessResult Sema::CheckMemberOperatorAccess(SourceLocation OpLoc,
   return CheckAccess(*this, OpLoc, Entity);
 }
 
+/// Checks access to the target of a friend declaration.
+Sema::AccessResult Sema::CheckFriendAccess(NamedDecl *target) {
+  assert(isa<CXXMethodDecl>(target) ||
+         (isa<FunctionTemplateDecl>(target) &&
+          isa<CXXMethodDecl>(cast<FunctionTemplateDecl>(target)
+                               ->getTemplatedDecl())));
+
+  // Friendship lookup is a redeclaration lookup, so there's never an
+  // inheritance path modifying access.
+  AccessSpecifier access = target->getAccess();
+
+  if (!getLangOpts().AccessControl || access == AS_public)
+    return AR_accessible;
+
+  CXXMethodDecl *method = dyn_cast<CXXMethodDecl>(target);
+  if (!method)
+    method = cast<CXXMethodDecl>(
+                     cast<FunctionTemplateDecl>(target)->getTemplatedDecl());
+  assert(method->getQualifier());
+
+  AccessTarget entity(Context, AccessTarget::Member,
+                      cast<CXXRecordDecl>(target->getDeclContext()),
+                      DeclAccessPair::make(target, access),
+                      /*no instance context*/ QualType());
+  entity.setDiag(diag::err_access_friend_function)
+    << method->getQualifierLoc().getSourceRange();
+
+  // We need to bypass delayed-diagnostics because we might be called
+  // while the ParsingDeclarator is active.
+  EffectiveContext EC(CurContext);
+  switch (CheckEffectiveAccess(*this, EC, target->getLocation(), entity)) {
+  case AR_accessible: return Sema::AR_accessible;
+  case AR_inaccessible: return Sema::AR_inaccessible;
+  case AR_dependent: return Sema::AR_dependent;
+  }
+  llvm_unreachable("falling off end");
+}
+
 Sema::AccessResult Sema::CheckAddressOfMemberAccess(Expr *OvlExpr,
                                                     DeclAccessPair Found) {
   if (!getLangOpts().AccessControl ||
@@ -1714,13 +1790,10 @@ Sema::AccessResult Sema::CheckAddressOfMemberAccess(Expr *OvlExpr,
 
 /// Checks access for a hierarchy conversion.
 ///
-/// \param IsBaseToDerived whether this is a base-to-derived conversion (true)
-///     or a derived-to-base conversion (false)
 /// \param ForceCheck true if this check should be performed even if access
 ///     control is disabled;  some things rely on this for semantics
 /// \param ForceUnprivileged true if this check should proceed as if the
 ///     context had no special privileges
-/// \param ADK controls the kind of diagnostics that are used
 Sema::AccessResult Sema::CheckBaseClassAccess(SourceLocation AccessLoc,
                                               QualType Base,
                                               QualType Derived,
@@ -1776,7 +1849,7 @@ void Sema::CheckLookupAccess(const LookupResult &R) {
 /// specifiers into account, but no member access expressions and such.
 ///
 /// \param Decl the declaration to check if it can be accessed
-/// \param Class the class/context from which to start the search
+/// \param Ctx the class/context from which to start the search
 /// \return true if the Decl is accessible from the Class, false otherwise.
 bool Sema::IsSimplyAccessible(NamedDecl *Decl, DeclContext *Ctx) {
   if (CXXRecordDecl *Class = dyn_cast<CXXRecordDecl>(Ctx)) {
@@ -1835,16 +1908,4 @@ bool Sema::IsSimplyAccessible(NamedDecl *Decl, DeclContext *Ctx) {
   }
   
   return true;
-}
-
-void Sema::ActOnStartSuppressingAccessChecks() {
-  assert(!SuppressAccessChecking &&
-         "Tried to start access check suppression when already started.");
-  SuppressAccessChecking = true;
-}
-
-void Sema::ActOnStopSuppressingAccessChecks() {
-  assert(SuppressAccessChecking &&
-         "Tried to stop access check suprression when already stopped.");
-  SuppressAccessChecking = false;
 }

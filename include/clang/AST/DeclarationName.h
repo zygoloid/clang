@@ -14,8 +14,6 @@
 #define LLVM_CLANG_AST_DECLARATIONNAME_H
 
 #include "clang/Basic/IdentifierTable.h"
-#include "clang/AST/Type.h"
-#include "clang/AST/CanonicalType.h"
 #include "clang/Basic/PartialDiagnostic.h"
 #include "llvm/Support/Compiler.h"
 
@@ -24,14 +22,20 @@ namespace llvm {
 }
 
 namespace clang {
-  class CXXSpecialName;
-  class CXXOperatorIdName;
+  class ASTContext;
   class CXXLiteralOperatorIdName;
+  class CXXOperatorIdName;
+  class CXXSpecialName;
   class DeclarationNameExtra;
   class IdentifierInfo;
   class MultiKeywordSelector;
-  class UsingDirectiveDecl;
+  class QualType;
+  class Type;
   class TypeSourceInfo;
+  class UsingDirectiveDecl;
+
+  template <typename> class CanQual;
+  typedef CanQual<Type> CanQualType;
 
 /// DeclarationName - The name of a declaration. In the common case,
 /// this just stores an IdentifierInfo pointer to a normal
@@ -109,8 +113,8 @@ private:
   /// CXXSpecialName, returns a pointer to it. Otherwise, returns
   /// a NULL pointer.
   CXXSpecialName *getAsCXXSpecialName() const {
-    if (getNameKind() >= CXXConstructorName &&
-        getNameKind() <= CXXConversionFunctionName)
+    NameKind Kind = getNameKind();
+    if (Kind >= CXXConstructorName && Kind <= CXXConversionFunctionName)
       return reinterpret_cast<CXXSpecialName *>(Ptr & ~PtrMask);
     return 0;
   }
@@ -156,14 +160,8 @@ private:
   friend class DeclarationNameTable;
   friend class NamedDecl;
 
-  /// getFETokenInfoAsVoid - Retrieves the front end-specified pointer
-  /// for this name as a void pointer.
-  void *getFETokenInfoAsVoid() const {
-    if (getNameKind() == Identifier)
-      return getAsIdentifierInfo()->getFETokenInfo<void>();
-    return getFETokenInfoAsVoidSlow();
-  }
-
+  /// getFETokenInfoAsVoidSlow - Retrieves the front end-specified pointer
+  /// for this name as a void pointer if it's not an identifier.
   void *getFETokenInfoAsVoidSlow() const;
 
 public:
@@ -273,7 +271,11 @@ public:
   /// declaration names, including normal identifiers and C++
   /// constructors, destructors, and conversion functions.
   template<typename T>
-  T *getFETokenInfo() const { return static_cast<T*>(getFETokenInfoAsVoid()); }
+  T *getFETokenInfo() const {
+    if (const IdentifierInfo *Info = getAsIdentifierInfo())
+      return Info->getFETokenInfo<T>();
+    return static_cast<T*>(getFETokenInfoAsVoidSlow());
+  }
 
   void setFETokenInfo(void *T);
 
@@ -336,8 +338,8 @@ class DeclarationNameTable {
   CXXOperatorIdName *CXXOperatorNames; // Operator names
   void *CXXLiteralOperatorNames; // Actually a CXXOperatorIdName*
 
-  DeclarationNameTable(const DeclarationNameTable&);            // NONCOPYABLE
-  DeclarationNameTable& operator=(const DeclarationNameTable&); // NONCOPYABLE
+  DeclarationNameTable(const DeclarationNameTable&) LLVM_DELETED_FUNCTION;
+  void operator=(const DeclarationNameTable&) LLVM_DELETED_FUNCTION;
 
 public:
   DeclarationNameTable(const ASTContext &C);
@@ -351,23 +353,15 @@ public:
 
   /// getCXXConstructorName - Returns the name of a C++ constructor
   /// for the given Type.
-  DeclarationName getCXXConstructorName(CanQualType Ty) {
-    return getCXXSpecialName(DeclarationName::CXXConstructorName, 
-                             Ty.getUnqualifiedType());
-  }
+  DeclarationName getCXXConstructorName(CanQualType Ty);
 
   /// getCXXDestructorName - Returns the name of a C++ destructor
   /// for the given Type.
-  DeclarationName getCXXDestructorName(CanQualType Ty) {
-    return getCXXSpecialName(DeclarationName::CXXDestructorName, 
-                             Ty.getUnqualifiedType());
-  }
+  DeclarationName getCXXDestructorName(CanQualType Ty);
 
   /// getCXXConversionFunctionName - Returns the name of a C++
   /// conversion function for the given Type.
-  DeclarationName getCXXConversionFunctionName(CanQualType Ty) {
-    return getCXXSpecialName(DeclarationName::CXXConversionFunctionName, Ty);
-  }
+  DeclarationName getCXXConversionFunctionName(CanQualType Ty);
 
   /// getCXXSpecialName - Returns a declaration name for special kind
   /// of C++ name, e.g., for a constructor, destructor, or conversion
@@ -388,32 +382,35 @@ public:
 /// for a declaration name. Needs a DeclarationName in order
 /// to be interpreted correctly.
 struct DeclarationNameLoc {
+  // The source location for identifier stored elsewhere.
+  // struct {} Identifier;
+
+  // Type info for constructors, destructors and conversion functions.
+  // Locations (if any) for the tilde (destructor) or operator keyword
+  // (conversion) are stored elsewhere.
+  struct NT {
+    TypeSourceInfo* TInfo;
+  };
+
+  // The location (if any) of the operator keyword is stored elsewhere.
+  struct CXXOpName {
+    unsigned BeginOpNameLoc;
+    unsigned EndOpNameLoc;
+  };
+
+  // The location (if any) of the operator keyword is stored elsewhere.
+  struct CXXLitOpName {
+    unsigned OpNameLoc;
+  };
+
+  // struct {} CXXUsingDirective;
+  // struct {} ObjCZeroArgSelector;
+  // struct {} ObjCOneArgSelector;
+  // struct {} ObjCMultiArgSelector;
   union {
-    // The source location for identifier stored elsewhere.
-    // struct {} Identifier;
-
-    // Type info for constructors, destructors and conversion functions.
-    // Locations (if any) for the tilde (destructor) or operator keyword
-    // (conversion) are stored elsewhere.
-    struct {
-      TypeSourceInfo* TInfo;
-    } NamedType;
-
-    // The location (if any) of the operator keyword is stored elsewhere.
-    struct {
-      unsigned BeginOpNameLoc;
-      unsigned EndOpNameLoc;
-    } CXXOperatorName;
-
-    // The location (if any) of the operator keyword is stored elsewhere.
-    struct {
-      unsigned OpNameLoc;
-    } CXXLiteralOperatorName;
-
-    // struct {} CXXUsingDirective;
-    // struct {} ObjCZeroArgSelector;
-    // struct {} ObjCOneArgSelector;
-    // struct {} ObjCMultiArgSelector;
+    struct NT NamedType;
+    struct CXXOpName CXXOperatorName;
+    struct CXXLitOpName CXXLiteralOperatorName;
   };
 
   DeclarationNameLoc(DeclarationName Name);
@@ -527,9 +524,7 @@ public:
   SourceLocation getEndLoc() const;
   /// getSourceRange - The range of the declaration name.
   SourceRange getSourceRange() const LLVM_READONLY {
-    SourceLocation BeginLoc = getBeginLoc();
-    SourceLocation EndLoc = getEndLoc();
-    return SourceRange(BeginLoc, EndLoc.isValid() ? EndLoc : BeginLoc);
+    return SourceRange(getLocStart(), getLocEnd());
   }
   SourceLocation getLocStart() const LLVM_READONLY {
     return getBeginLoc();

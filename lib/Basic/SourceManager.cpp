@@ -12,20 +12,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Basic/SourceManager.h"
-#include "clang/Basic/SourceManagerInternals.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/FileManager.h"
-#include "llvm/ADT/StringSwitch.h"
+#include "clang/Basic/SourceManagerInternals.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/Capacity.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/Capacity.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
-#include <string>
 #include <cstring>
+#include <string>
 #include <sys/stat.h>
 
 using namespace clang;
@@ -97,7 +97,10 @@ const llvm::MemoryBuffer *ContentCache::getBuffer(DiagnosticsEngine &Diag,
   }    
 
   std::string ErrorStr;
-  Buffer.setPointer(SM.getFileManager().getBufferForFile(ContentsEntry, &ErrorStr));
+  bool isVolatile = SM.userFilesAreVolatile() && !IsSystemFile;
+  Buffer.setPointer(SM.getFileManager().getBufferForFile(ContentsEntry,
+                                                         &ErrorStr,
+                                                         isVolatile));
 
   // If we were unable to open the file, then we are in an inconsistent
   // situation where the content cache referenced a file which no longer
@@ -189,9 +192,9 @@ unsigned LineTableInfo::getLineTableFilenameID(StringRef Name) {
 }
 
 /// AddLineNote - Add a line note to the line table that indicates that there
-/// is a #line at the specified FID/Offset location which changes the presumed
+/// is a \#line at the specified FID/Offset location which changes the presumed
 /// location to LineNo/FilenameID.
-void LineTableInfo::AddLineNote(int FID, unsigned Offset,
+void LineTableInfo::AddLineNote(FileID FID, unsigned Offset,
                                 unsigned LineNo, int FilenameID) {
   std::vector<LineEntry> &Entries = LineEntries[FID];
 
@@ -219,10 +222,10 @@ void LineTableInfo::AddLineNote(int FID, unsigned Offset,
 
 /// AddLineNote This is the same as the previous version of AddLineNote, but is
 /// used for GNU line markers.  If EntryExit is 0, then this doesn't change the
-/// presumed #include stack.  If it is 1, this is a file entry, if it is 2 then
+/// presumed \#include stack.  If it is 1, this is a file entry, if it is 2 then
 /// this is a file exit.  FileKind specifies whether this is a system header or
 /// extern C system header.
-void LineTableInfo::AddLineNote(int FID, unsigned Offset,
+void LineTableInfo::AddLineNote(FileID FID, unsigned Offset,
                                 unsigned LineNo, int FilenameID,
                                 unsigned EntryExit,
                                 SrcMgr::CharacteristicKind FileKind) {
@@ -256,7 +259,7 @@ void LineTableInfo::AddLineNote(int FID, unsigned Offset,
 
 /// FindNearestLineEntry - Find the line entry nearest to FID that is before
 /// it.  If there is no line entry before Offset in FID, return null.
-const LineEntry *LineTableInfo::FindNearestLineEntry(int FID,
+const LineEntry *LineTableInfo::FindNearestLineEntry(FileID FID,
                                                      unsigned Offset) {
   const std::vector<LineEntry> &Entries = LineEntries[FID];
   assert(!Entries.empty() && "No #line entries for this FID after all!");
@@ -275,7 +278,7 @@ const LineEntry *LineTableInfo::FindNearestLineEntry(int FID,
 
 /// \brief Add a new line entry that has already been encoded into
 /// the internal representation of the line table.
-void LineTableInfo::AddEntry(int FID,
+void LineTableInfo::AddEntry(FileID FID,
                              const std::vector<LineEntry> &Entries) {
   LineEntries[FID] = Entries;
 }
@@ -308,7 +311,7 @@ void SourceManager::AddLineNote(SourceLocation Loc, unsigned LineNo,
 
   if (LineTable == 0)
     LineTable = new LineTableInfo();
-  LineTable->AddLineNote(LocInfo.first.ID, LocInfo.second, LineNo, FilenameID);
+  LineTable->AddLineNote(LocInfo.first, LocInfo.second, LineNo, FilenameID);
 }
 
 /// AddLineNote - Add a GNU line marker to the line table.
@@ -353,7 +356,7 @@ void SourceManager::AddLineNote(SourceLocation Loc, unsigned LineNo,
   else if (IsFileExit)
     EntryExit = 2;
 
-  LineTable->AddLineNote(LocInfo.first.ID, LocInfo.second, LineNo, FilenameID,
+  LineTable->AddLineNote(LocInfo.first, LocInfo.second, LineNo, FilenameID,
                          EntryExit, FileKind);
 }
 
@@ -367,8 +370,10 @@ LineTableInfo &SourceManager::getLineTable() {
 // Private 'Create' methods.
 //===----------------------------------------------------------------------===//
 
-SourceManager::SourceManager(DiagnosticsEngine &Diag, FileManager &FileMgr)
+SourceManager::SourceManager(DiagnosticsEngine &Diag, FileManager &FileMgr,
+                             bool UserFilesAreVolatile)
   : Diag(Diag), FileMgr(FileMgr), OverridenFilesKeepOriginalName(true),
+    UserFilesAreVolatile(UserFilesAreVolatile),
     ExternalSLocEntries(0), LineTable(0), NumLinearScans(0),
     NumBinaryProbes(0), FakeBufferForRecovery(0),
     FakeContentCacheForRecovery(0) {
@@ -426,7 +431,8 @@ void SourceManager::clearIDTables() {
 /// getOrCreateContentCache - Create or return a cached ContentCache for the
 /// specified file.
 const ContentCache *
-SourceManager::getOrCreateContentCache(const FileEntry *FileEnt) {
+SourceManager::getOrCreateContentCache(const FileEntry *FileEnt,
+                                       bool isSystemFile) {
   assert(FileEnt && "Didn't specify a file entry to use?");
 
   // Do we already have information about this file?
@@ -454,6 +460,8 @@ SourceManager::getOrCreateContentCache(const FileEntry *FileEnt) {
   } else {
     new (Entry) ContentCache(FileEnt);
   }
+
+  Entry->IsSystemFile = isSystemFile;
 
   return Entry;
 }
@@ -713,7 +721,7 @@ FileID SourceManager::getFileIDLocal(unsigned SLocOffset) const {
 
   // See if this is near the file point - worst case we start scanning from the
   // most newly created FileID.
-  std::vector<SrcMgr::SLocEntry>::const_iterator I;
+  const SrcMgr::SLocEntry *I;
 
   if (LastFileIDLookup.ID < 0 ||
       LocalSLocEntryTable[LastFileIDLookup.ID].getOffset() < SLocOffset) {
@@ -832,10 +840,17 @@ FileID SourceManager::getFileIDLoaded(unsigned SLocOffset) const {
     ++NumProbes;
     unsigned MiddleIndex = (LessIndex - GreaterIndex) / 2 + GreaterIndex;
     const SrcMgr::SLocEntry &E = getLoadedSLocEntry(MiddleIndex);
+    if (E.getOffset() == 0)
+      return FileID(); // invalid entry.
 
     ++NumProbes;
 
     if (E.getOffset() > SLocOffset) {
+      // Sanity checking, otherwise a bug may lead to hanging in release build.
+      if (GreaterIndex == MiddleIndex) {
+        assert(0 && "binary search missed the entry");
+        return FileID();
+      }
       GreaterIndex = MiddleIndex;
       continue;
     }
@@ -848,6 +863,11 @@ FileID SourceManager::getFileIDLoaded(unsigned SLocOffset) const {
       return Res;
     }
 
+    // Sanity checking, otherwise a bug may lead to hanging in release build.
+    if (LessIndex == MiddleIndex) {
+      assert(0 && "binary search missed the entry");
+      return FileID();
+    }
     LessIndex = MiddleIndex;
   }
 }
@@ -966,9 +986,16 @@ bool SourceManager::isMacroArgExpansion(SourceLocation Loc) const {
   if (!Loc.isMacroID()) return false;
 
   FileID FID = getFileID(Loc);
-  const SrcMgr::SLocEntry *E = &getSLocEntry(FID);
-  const SrcMgr::ExpansionInfo &Expansion = E->getExpansion();
+  const SrcMgr::ExpansionInfo &Expansion = getSLocEntry(FID).getExpansion();
   return Expansion.isMacroArgExpansion();
+}
+
+bool SourceManager::isMacroBodyExpansion(SourceLocation Loc) const {
+  if (!Loc.isMacroID()) return false;
+
+  FileID FID = getFileID(Loc);
+  const SrcMgr::ExpansionInfo &Expansion = getSLocEntry(FID).getExpansion();
+  return Expansion.isMacroBodyExpansion();
 }
 
 
@@ -1014,10 +1041,23 @@ unsigned SourceManager::getColumnNumber(FileID FID, unsigned FilePos,
   if (MyInvalid)
     return 1;
 
-  if (FilePos >= MemBuf->getBufferSize()) {
+  // It is okay to request a position just past the end of the buffer.
+  if (FilePos > MemBuf->getBufferSize()) {
     if (Invalid)
-      *Invalid = MyInvalid;
+      *Invalid = true;
     return 1;
+  }
+
+  // See if we just calculated the line number for this FilePos and can use
+  // that to lookup the start of the line instead of searching for it.
+  if (LastLineNoFileIDQuery == FID &&
+      LastLineNoContentCache->SourceLineCache != 0 &&
+      LastLineNoResult < LastLineNoContentCache->NumLines) {
+    unsigned *SourceLineCache = LastLineNoContentCache->SourceLineCache;
+    unsigned LineStart = SourceLineCache[LastLineNoResult - 1];
+    unsigned LineEnd = SourceLineCache[LastLineNoResult];
+    if (FilePos >= LineStart && FilePos < LineEnd)
+      return FilePos - LineStart + 1;
   }
 
   const char *Buf = MemBuf->getBufferStart();
@@ -1103,7 +1143,7 @@ static void ComputeLineNumbers(DiagnosticsEngine &Diag, ContentCache *FI,
 
     // Scan 16 byte chunks for '\r' and '\n'. Ignore '\0'.
     while (NextBuf+16 <= End) {
-      __m128i Chunk = *(__m128i*)NextBuf;
+      const __m128i Chunk = *(const __m128i*)NextBuf;
       __m128i Cmp = _mm_or_si128(_mm_cmpeq_epi8(Chunk, CRs),
                                  _mm_cmpeq_epi8(Chunk, LFs));
       unsigned Mask = _mm_movemask_epi8(Cmp);
@@ -1314,7 +1354,7 @@ SourceManager::getFileCharacteristic(SourceLocation Loc) const {
   assert(LineTable && "Can't have linetable entries without a LineTable!");
   // See if there is a #line directive before the location.
   const LineEntry *Entry =
-    LineTable->FindNearestLineEntry(LocInfo.first.ID, LocInfo.second);
+    LineTable->FindNearestLineEntry(LocInfo.first, LocInfo.second);
 
   // If this is before the first line marker, use the file characteristic.
   if (!Entry)
@@ -1324,7 +1364,7 @@ SourceManager::getFileCharacteristic(SourceLocation Loc) const {
 }
 
 /// Return the filename or buffer identifier of the buffer the location is in.
-/// Note that this name does not respect #line directives.  Use getPresumedLoc
+/// Note that this name does not respect \#line directives.  Use getPresumedLoc
 /// for normal clients.
 const char *SourceManager::getBufferName(SourceLocation Loc, 
                                          bool *Invalid) const {
@@ -1335,13 +1375,14 @@ const char *SourceManager::getBufferName(SourceLocation Loc,
 
 
 /// getPresumedLoc - This method returns the "presumed" location of a
-/// SourceLocation specifies.  A "presumed location" can be modified by #line
+/// SourceLocation specifies.  A "presumed location" can be modified by \#line
 /// or GNU line marker directives.  This provides a view on the data that a
 /// user should see in diagnostics, for example.
 ///
 /// Note that a presumed location is always given as the expansion point of an
 /// expansion location, not at the spelling location.
-PresumedLoc SourceManager::getPresumedLoc(SourceLocation Loc) const {
+PresumedLoc SourceManager::getPresumedLoc(SourceLocation Loc,
+                                          bool UseLineDirectives) const {
   if (Loc.isInvalid()) return PresumedLoc();
 
   // Presumed locations are always for expansion points.
@@ -1375,11 +1416,11 @@ PresumedLoc SourceManager::getPresumedLoc(SourceLocation Loc) const {
 
   // If we have #line directives in this file, update and overwrite the physical
   // location info if appropriate.
-  if (FI.hasLineDirectives()) {
+  if (UseLineDirectives && FI.hasLineDirectives()) {
     assert(LineTable && "Can't have linetable entries without a LineTable!");
     // See if there is a #line directive before this.  If so, get it.
     if (const LineEntry *Entry =
-          LineTable->FindNearestLineEntry(LocInfo.first.ID, LocInfo.second)) {
+          LineTable->FindNearestLineEntry(LocInfo.first, LocInfo.second)) {
       // If the LineEntry indicates a filename, use it.
       if (Entry->FilenameID != -1)
         Filename = LineTable->getFilename(Entry->FilenameID);
@@ -1431,13 +1472,13 @@ unsigned SourceManager::getFileIDSize(FileID FID) const {
 ///
 /// This routine involves a system call, and therefore should only be used
 /// in non-performance-critical code.
-static llvm::Optional<ino_t> getActualFileInode(const FileEntry *File) {
+static Optional<ino_t> getActualFileInode(const FileEntry *File) {
   if (!File)
-    return llvm::Optional<ino_t>();
+    return None;
   
   struct stat StatBuf;
   if (::stat(File->getName(), &StatBuf))
-    return llvm::Optional<ino_t>();
+    return None;
     
   return StatBuf.st_ino;
 }
@@ -1468,8 +1509,8 @@ FileID SourceManager::translateFile(const FileEntry *SourceFile) const {
 
   // First, check the main file ID, since it is common to look for a
   // location in the main file.
-  llvm::Optional<ino_t> SourceFileInode;
-  llvm::Optional<StringRef> SourceFileName;
+  Optional<ino_t> SourceFileInode;
+  Optional<StringRef> SourceFileName;
   if (!MainFileID.isInvalid()) {
     bool Invalid = false;
     const SLocEntry &MainSLoc = getSLocEntry(MainFileID, &Invalid);
@@ -1491,8 +1532,7 @@ FileID SourceManager::translateFile(const FileEntry *SourceFile) const {
         if (*SourceFileName == llvm::sys::path::filename(MainFile->getName())) {
           SourceFileInode = getActualFileInode(SourceFile);
           if (SourceFileInode) {
-            if (llvm::Optional<ino_t> MainFileInode 
-                                               = getActualFileInode(MainFile)) {
+            if (Optional<ino_t> MainFileInode = getActualFileInode(MainFile)) {
               if (*SourceFileInode == *MainFileInode) {
                 FirstFID = MainFileID;
                 SourceFile = MainFile;
@@ -1556,7 +1596,7 @@ FileID SourceManager::translateFile(const FileEntry *SourceFile) const {
       const FileEntry *Entry =FileContentCache? FileContentCache->OrigEntry : 0;
         if (Entry && 
             *SourceFileName == llvm::sys::path::filename(Entry->getName())) {
-          if (llvm::Optional<ino_t> EntryInode = getActualFileInode(Entry)) {
+          if (Optional<ino_t> EntryInode = getActualFileInode(Entry)) {
             if (*SourceFileInode == *EntryInode) {
               FirstFID = FileID::get(I);
               SourceFile = Entry;
@@ -1568,6 +1608,7 @@ FileID SourceManager::translateFile(const FileEntry *SourceFile) const {
     }      
   }
   
+  (void) SourceFile;
   return FirstFID;
 }
 
@@ -1684,46 +1725,91 @@ void SourceManager::computeMacroArgsCache(MacroArgsMap *&CachePtr,
     if (!ExpInfo.isMacroArgExpansion())
       continue;
 
-    SourceLocation SpellLoc = ExpInfo.getSpellingLoc();
-    while (!SpellLoc.isFileID()) {
-      std::pair<FileID, unsigned> LocInfo = getDecomposedLoc(SpellLoc);
-      const ExpansionInfo &Info = getSLocEntry(LocInfo.first).getExpansion();
-      if (!Info.isMacroArgExpansion())
-        break;
-      SpellLoc = Info.getSpellingLoc().getLocWithOffset(LocInfo.second);
-    }
-    if (!SpellLoc.isFileID())
-      continue;
-    
-    unsigned BeginOffs;
-    if (!isInFileID(SpellLoc, FID, &BeginOffs))
-      continue;
-
-    unsigned EndOffs = BeginOffs + getFileIDSize(FileID::get(ID));
-
-    // Add a new chunk for this macro argument. A previous macro argument chunk
-    // may have been lexed again, so e.g. if the map is
-    //     0   -> SourceLocation()
-    //     100 -> Expanded loc #1
-    //     110 -> SourceLocation()
-    // and we found a new macro FileID that lexed from offet 105 with length 3,
-    // the new map will be:
-    //     0   -> SourceLocation()
-    //     100 -> Expanded loc #1
-    //     105 -> Expanded loc #2
-    //     108 -> Expanded loc #1
-    //     110 -> SourceLocation()
-    //
-    // Since re-lexed macro chunks will always be the same size or less of
-    // previous chunks, we only need to find where the ending of the new macro
-    // chunk is mapped to and update the map with new begin/end mappings.
-
-    MacroArgsMap::iterator I = MacroArgsCache.upper_bound(EndOffs);
-    --I;
-    SourceLocation EndOffsMappedLoc = I->second;
-    MacroArgsCache[BeginOffs] = SourceLocation::getMacroLoc(Entry.getOffset());
-    MacroArgsCache[EndOffs] = EndOffsMappedLoc;
+    associateFileChunkWithMacroArgExp(MacroArgsCache, FID,
+                                 ExpInfo.getSpellingLoc(),
+                                 SourceLocation::getMacroLoc(Entry.getOffset()),
+                                 getFileIDSize(FileID::get(ID)));
   }
+}
+
+void SourceManager::associateFileChunkWithMacroArgExp(
+                                         MacroArgsMap &MacroArgsCache,
+                                         FileID FID,
+                                         SourceLocation SpellLoc,
+                                         SourceLocation ExpansionLoc,
+                                         unsigned ExpansionLength) const {
+  if (!SpellLoc.isFileID()) {
+    unsigned SpellBeginOffs = SpellLoc.getOffset();
+    unsigned SpellEndOffs = SpellBeginOffs + ExpansionLength;
+
+    // The spelling range for this macro argument expansion can span multiple
+    // consecutive FileID entries. Go through each entry contained in the
+    // spelling range and if one is itself a macro argument expansion, recurse
+    // and associate the file chunk that it represents.
+
+    FileID SpellFID; // Current FileID in the spelling range.
+    unsigned SpellRelativeOffs;
+    llvm::tie(SpellFID, SpellRelativeOffs) = getDecomposedLoc(SpellLoc);
+    while (1) {
+      const SLocEntry &Entry = getSLocEntry(SpellFID);
+      unsigned SpellFIDBeginOffs = Entry.getOffset();
+      unsigned SpellFIDSize = getFileIDSize(SpellFID);
+      unsigned SpellFIDEndOffs = SpellFIDBeginOffs + SpellFIDSize;
+      const ExpansionInfo &Info = Entry.getExpansion();
+      if (Info.isMacroArgExpansion()) {
+        unsigned CurrSpellLength;
+        if (SpellFIDEndOffs < SpellEndOffs)
+          CurrSpellLength = SpellFIDSize - SpellRelativeOffs;
+        else
+          CurrSpellLength = ExpansionLength;
+        associateFileChunkWithMacroArgExp(MacroArgsCache, FID,
+                      Info.getSpellingLoc().getLocWithOffset(SpellRelativeOffs),
+                      ExpansionLoc, CurrSpellLength);
+      }
+
+      if (SpellFIDEndOffs >= SpellEndOffs)
+        return; // we covered all FileID entries in the spelling range.
+
+      // Move to the next FileID entry in the spelling range.
+      unsigned advance = SpellFIDSize - SpellRelativeOffs + 1;
+      ExpansionLoc = ExpansionLoc.getLocWithOffset(advance);
+      ExpansionLength -= advance;
+      ++SpellFID.ID;
+      SpellRelativeOffs = 0;
+    }
+
+  }
+
+  assert(SpellLoc.isFileID());
+
+  unsigned BeginOffs;
+  if (!isInFileID(SpellLoc, FID, &BeginOffs))
+    return;
+
+  unsigned EndOffs = BeginOffs + ExpansionLength;
+
+  // Add a new chunk for this macro argument. A previous macro argument chunk
+  // may have been lexed again, so e.g. if the map is
+  //     0   -> SourceLocation()
+  //     100 -> Expanded loc #1
+  //     110 -> SourceLocation()
+  // and we found a new macro FileID that lexed from offet 105 with length 3,
+  // the new map will be:
+  //     0   -> SourceLocation()
+  //     100 -> Expanded loc #1
+  //     105 -> Expanded loc #2
+  //     108 -> Expanded loc #1
+  //     110 -> SourceLocation()
+  //
+  // Since re-lexed macro chunks will always be the same size or less of
+  // previous chunks, we only need to find where the ending of the new macro
+  // chunk is mapped to and update the map with new begin/end mappings.
+
+  MacroArgsMap::iterator I = MacroArgsCache.upper_bound(EndOffs);
+  --I;
+  SourceLocation EndOffsMappedLoc = I->second;
+  MacroArgsCache[BeginOffs] = ExpansionLoc;
+  MacroArgsCache[EndOffs] = EndOffsMappedLoc;
 }
 
 /// \brief If \arg Loc points inside a function macro argument, the returned
@@ -1781,7 +1867,32 @@ static bool MoveUpIncludeHierarchy(std::pair<FileID, unsigned> &Loc,
   Loc = SM.getDecomposedLoc(UpperLoc);
   return false;
 }
-  
+
+/// Return the cache entry for comparing the given file IDs
+/// for isBeforeInTranslationUnit.
+InBeforeInTUCacheEntry &SourceManager::getInBeforeInTUCache(FileID LFID,
+                                                            FileID RFID) const {
+  // This is a magic number for limiting the cache size.  It was experimentally
+  // derived from a small Objective-C project (where the cache filled
+  // out to ~250 items).  We can make it larger if necessary.
+  enum { MagicCacheSize = 300 };
+  IsBeforeInTUCacheKey Key(LFID, RFID);
+
+  // If the cache size isn't too large, do a lookup and if necessary default
+  // construct an entry.  We can then return it to the caller for direct
+  // use.  When they update the value, the cache will get automatically
+  // updated as well.
+  if (IBTUCache.size() < MagicCacheSize)
+    return IBTUCache[Key];
+
+  // Otherwise, do a lookup that will not construct a new value.
+  InBeforeInTUCache::iterator I = IBTUCache.find(Key);
+  if (I != IBTUCache.end())
+    return I->second;
+
+  // Fall back to the overflow value.
+  return IBTUCacheOverflow;
+}
 
 /// \brief Determines the order of 2 source locations in the translation unit.
 ///
@@ -1798,6 +1909,11 @@ bool SourceManager::isBeforeInTranslationUnit(SourceLocation LHS,
   // If the source locations are in the same file, just compare offsets.
   if (LOffs.first == ROffs.first)
     return LOffs.second < ROffs.second;
+
+  // If we are comparing a source location with multiple locations in the same
+  // file, we get a big win by caching the result.
+  InBeforeInTUCacheEntry &IsBeforeInTUCache =
+    getInBeforeInTUCache(LOffs.first, ROffs.first);
 
   // If we are comparing a source location with multiple locations in the same
   // file, we get a big win by caching the result.
@@ -1853,8 +1969,6 @@ bool SourceManager::isBeforeInTranslationUnit(SourceLocation LHS,
   return LOffs.first < ROffs.first;
 }
 
-/// PrintStats - Print statistics to stderr.
-///
 void SourceManager::PrintStats() const {
   llvm::errs() << "\n*** Source Manager Stats:\n";
   llvm::errs() << FileInfos.size() << " files mapped, " << MemBufferInfos.size()

@@ -1,4 +1,4 @@
-//===--- TransAPIUses.cpp - Tranformations to ARC mode --------------------===//
+//===--- TransAPIUses.cpp - Transformations to ARC mode -------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -19,6 +19,7 @@
 
 #include "Transforms.h"
 #include "Internals.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/Sema/SemaDiagnostic.h"
 
 using namespace clang;

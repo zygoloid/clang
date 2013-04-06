@@ -131,14 +131,14 @@ namespace IncompleteClassTypeAddr {
 namespace UndefinedBehavior {
   void f(int n) {
     switch (n) {
-    case (int)4.4e9: // expected-error {{constant expression}} expected-note {{value 4.4E+9 is outside the range of representable values of type 'int'}}
+    case (int)4.4e9: // expected-error {{constant expression}} expected-note {{value 4.4E+9 is outside the range of representable values of type 'int'}} expected-note {{previous case defined here}}
     case (int)0x80000000u: // ok
     case (int)10000000000ll: // expected-note {{here}}
     case (unsigned int)10000000000ll: // expected-error {{duplicate case value}}
     case (int)(unsigned)(long long)4.4e9: // ok
-    case (int)(float)1e300: // expected-error {{constant expression}} expected-note {{value 1.0E+300 is outside the range of representable values of type 'float'}}
+    case (int)(float)1e300: // expected-error {{constant expression}} expected-note {{value 1.0E+300 is outside the range of representable values of type 'float'}} expected-error {{duplicate case value '2147483647'}} expected-note {{previous case defined here}}
     case (int)((float)1e37 / 1e30): // ok
-    case (int)(__fp16)65536: // expected-error {{constant expression}} expected-note {{value 65536 is outside the range of representable values of type 'half'}}
+    case (int)(__fp16)65536: // expected-error {{constant expression}} expected-note {{value 65536 is outside the range of representable values of type 'half'}} expected-error {{duplicate case value '2147483647'}}
       break;
     }
   }
@@ -594,3 +594,16 @@ static const bool or_value = and_or<true>::or_value;
 
 static_assert(and_value == false, "");
 static_assert(or_value == true, "");
+
+namespace rdar13090123 {
+  typedef __INTPTR_TYPE__ intptr_t;
+
+  constexpr intptr_t f(intptr_t x) {
+    return (((x) >> 21) * 8); // expected-note{{subexpression not valid in a constant expression}}
+  }
+
+  extern "C" int foo;
+
+  constexpr intptr_t i = f((intptr_t)&foo - 10); // expected-error{{constexpr variable 'i' must be initialized by a constant expression}} \
+  // expected-note{{in call to 'f((char*)&foo + -10)'}}
+}

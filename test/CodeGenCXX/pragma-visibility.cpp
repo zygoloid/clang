@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple i386-unknown-unknown -emit-llvm -o - %s | FileCheck %s
 
 #pragma GCC visibility push(hidden)
 struct x {
@@ -14,14 +14,6 @@ struct __attribute((visibility("default"))) x2 {
 };
 int x2::y = 10;
 // CHECK: @_ZN2x21yE = global
-#pragma GCC visibility pop
-
-#pragma GCC visibility push(hidden)
-struct x3 {
-  static int y;
-} __attribute((visibility("default")));
-int x3::y = 10;
-// CHECK: @_ZN2x31yE = global
 #pragma GCC visibility pop
 
 #pragma GCC visibility push(hidden)
@@ -59,4 +51,24 @@ namespace n __attribute((visibility("default")))  {
   void g() {}
   // CHECK: define hidden void @_ZN1n1gEv
 #pragma GCC visibility pop
+}
+
+namespace test2 {
+#pragma GCC visibility push(default)
+#pragma GCC visibility push(hidden)
+  struct foo { // foo is hidden
+  };
+#pragma GCC visibility pop
+  struct foo; // declaration is ok, we ignore the default in the stack
+  template<typename T>
+  struct bar { // bar is default
+    static void f(){}
+  };
+#pragma GCC visibility pop
+  void zed() {
+    bar<foo>::f();
+    bar<int>::f();
+  }
+  // CHECK: define linkonce_odr hidden void @_ZN5test23barINS_3fooEE1fEv
+  // CHECK: define linkonce_odr void @_ZN5test23barIiE1fEv
 }

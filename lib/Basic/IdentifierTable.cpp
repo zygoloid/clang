@@ -13,13 +13,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Basic/IdentifierTable.h"
+#include "clang/Basic/CharInfo.h"
 #include "clang/Basic/LangOptions.h"
-#include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringSwitch.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cstdio>
 
 using namespace clang;
@@ -32,6 +32,7 @@ IdentifierInfo::IdentifierInfo() {
   TokenID = tok::identifier;
   ObjCOrBuiltinID = 0;
   HasMacro = false;
+  HadMacro = false;
   IsExtension = false;
   IsCXX11CompatKeyword = false;
   IsPoisoned = false;
@@ -81,7 +82,7 @@ IdentifierTable::IdentifierTable(const LangOptions &LangOpts,
       
 
   // Add the '_experimental_modules_import' contextual keyword.
-  get("__experimental_modules_import").setModulesImport(true);
+  get("import").setModulesImport(true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -93,7 +94,7 @@ namespace {
   enum {
     KEYC99 = 0x1,
     KEYCXX = 0x2,
-    KEYCXX0X = 0x4,
+    KEYCXX11 = 0x4,
     KEYGNU = 0x8,
     KEYMS = 0x10,
     BOOLSUPPORT = 0x20,
@@ -103,7 +104,9 @@ namespace {
     KEYOPENCL = 0x200,
     KEYC11 = 0x400,
     KEYARC = 0x800,
-    KEYALL = 0x0fff
+    KEYNOMS = 0x01000,
+    WCHARSUPPORT = 0x02000,
+    KEYALL = (0xffff & ~KEYNOMS) // Because KEYNOMS is used to exclude.
   };
 }
 
@@ -121,12 +124,13 @@ static void AddKeyword(StringRef Keyword,
   unsigned AddResult = 0;
   if (Flags == KEYALL) AddResult = 2;
   else if (LangOpts.CPlusPlus && (Flags & KEYCXX)) AddResult = 2;
-  else if (LangOpts.CPlusPlus0x && (Flags & KEYCXX0X)) AddResult = 2;
+  else if (LangOpts.CPlusPlus11 && (Flags & KEYCXX11)) AddResult = 2;
   else if (LangOpts.C99 && (Flags & KEYC99)) AddResult = 2;
   else if (LangOpts.GNUKeywords && (Flags & KEYGNU)) AddResult = 1;
   else if (LangOpts.MicrosoftExt && (Flags & KEYMS)) AddResult = 1;
   else if (LangOpts.Borland && (Flags & KEYBORLAND)) AddResult = 1;
   else if (LangOpts.Bool && (Flags & BOOLSUPPORT)) AddResult = 2;
+  else if (LangOpts.WChar && (Flags & WCHARSUPPORT)) AddResult = 2;
   else if (LangOpts.AltiVec && (Flags & KEYALTIVEC)) AddResult = 2;
   else if (LangOpts.OpenCL && (Flags & KEYOPENCL)) AddResult = 2;
   else if (!LangOpts.CPlusPlus && (Flags & KEYNOCXX)) AddResult = 2;
@@ -134,8 +138,11 @@ static void AddKeyword(StringRef Keyword,
   // We treat bridge casts as objective-C keywords so we can warn on them
   // in non-arc mode.
   else if (LangOpts.ObjC2 && (Flags & KEYARC)) AddResult = 2;
-  else if (LangOpts.CPlusPlus && (Flags & KEYCXX0X)) AddResult = 3;
+  else if (LangOpts.CPlusPlus && (Flags & KEYCXX11)) AddResult = 3;
 
+  // Don't add this keyword under MicrosoftMode.
+  if (LangOpts.MicrosoftMode && (Flags & KEYNOMS))
+     return;
   // Don't add this keyword if disabled in this language.
   if (AddResult == 0) return;
 
@@ -154,8 +161,8 @@ static void AddCXXOperatorKeyword(StringRef Keyword,
   Info.setIsCPlusPlusOperatorKeyword();
 }
 
-/// AddObjCKeyword - Register an Objective-C @keyword like "class" "selector" or
-/// "property".
+/// AddObjCKeyword - Register an Objective-C \@keyword like "class" "selector"
+/// or "property".
 static void AddObjCKeyword(StringRef Name,
                            tok::ObjCKeywordKind ObjCID,
                            IdentifierTable &Table) {
@@ -397,9 +404,8 @@ std::string Selector::getAsString() const {
 /// given "word", which is assumed to end in a lowercase letter.
 static bool startsWithWord(StringRef name, StringRef word) {
   if (name.size() < word.size()) return false;
-  return ((name.size() == word.size() ||
-           !islower(name[word.size()]))
-          && name.startswith(word));
+  return ((name.size() == word.size() || !isLowercase(name[word.size()])) &&
+          name.startswith(word));
 }
 
 ObjCMethodFamily Selector::getMethodFamilyImpl(Selector sel) {
@@ -465,7 +471,7 @@ SelectorTable::constructSetterName(IdentifierTable &Idents,
   SmallString<100> SelectorName;
   SelectorName = "set";
   SelectorName += Name->getName();
-  SelectorName[3] = toupper(SelectorName[3]);
+  SelectorName[3] = toUppercase(SelectorName[3]);
   IdentifierInfo *SetterName = &Idents.get(SelectorName);
   return SelTable.getUnarySelector(SetterName);
 }

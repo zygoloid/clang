@@ -1,5 +1,5 @@
 // RUN: %clang_cc1 -analyze -analyzer-store=region -analyzer-checker=core,unix.Malloc -fblocks -verify %s
-// RUN: %clang_cc1 -analyze -analyzer-store=region -analyzer-checker=core,experimental.unix.MallocWithAnnotations -fblocks -verify %s
+// RUN: %clang_cc1 -analyze -analyzer-store=region -analyzer-checker=core,alpha.unix.MallocWithAnnotations -fblocks -verify %s
 void free(void *);
 
 void t1 () {
@@ -50,7 +50,7 @@ void t10 () {
 
 void t11 () {
   char *p = (char*)__builtin_alloca(2);
-  free(p); // expected-warning {{Argument to free() was allocated by alloca(), not malloc()}}
+  free(p); // expected-warning {{Memory allocated by alloca() should not be deallocated}}
 }
 
 void t12 () {

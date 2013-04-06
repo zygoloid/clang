@@ -17,7 +17,7 @@
 
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/Support/MDBuilder.h"
+#include "llvm/IR/MDBuilder.h"
 
 namespace llvm {
   class LLVMContext;
@@ -35,11 +35,18 @@ namespace clang {
 namespace CodeGen {
   class CGRecordLayout;
 
+  struct TBAAPathTag {
+    TBAAPathTag(const Type *B, const llvm::MDNode *A, uint64_t O)
+      : BaseT(B), AccessN(A), Offset(O) {}
+    const Type *BaseT;
+    const llvm::MDNode *AccessN;
+    uint64_t Offset;
+  };
+
 /// CodeGenTBAA - This class organizes the cross-module state that is used
 /// while lowering AST types to LLVM types.
 class CodeGenTBAA {
   ASTContext &Context;
-  llvm::LLVMContext& VMContext;
   const CodeGenOptions &CodeGenOpts;
   const LangOptions &Features;
   MangleContext &MContext;
@@ -47,8 +54,17 @@ class CodeGenTBAA {
   // MDHelper - Helper for creating metadata.
   llvm::MDBuilder MDHelper;
 
-  /// MetadataCache - This maps clang::Types to llvm::MDNodes describing them.
+  /// MetadataCache - This maps clang::Types to scalar llvm::MDNodes describing
+  /// them.
   llvm::DenseMap<const Type *, llvm::MDNode *> MetadataCache;
+  /// This maps clang::Types to a struct node in the type DAG.
+  llvm::DenseMap<const Type *, llvm::MDNode *> StructTypeMetadataCache;
+  /// This maps TBAAPathTags to a tag node.
+  llvm::DenseMap<TBAAPathTag, llvm::MDNode *> StructTagMetadataCache;
+
+  /// StructMetadataCache - This maps clang::Types to llvm::MDNodes describing
+  /// them for struct assignments.
+  llvm::DenseMap<const Type *, llvm::MDNode *> StructMetadataCache;
 
   llvm::MDNode *Root;
   llvm::MDNode *Char;
@@ -60,6 +76,13 @@ class CodeGenTBAA {
   /// getChar - This is the mdnode for "char", which is special, and any types
   /// considered to be equivalent to it.
   llvm::MDNode *getChar();
+
+  /// CollectFields - Collect information about the fields of a type for
+  /// !tbaa.struct metadata formation. Return false for an unsupported type.
+  bool CollectFields(uint64_t BaseOffset,
+                     QualType Ty,
+                     SmallVectorImpl<llvm::MDBuilder::TBAAStructField> &Fields,
+                     bool MayAlias);
 
 public:
   CodeGenTBAA(ASTContext &Ctx, llvm::LLVMContext &VMContext,
@@ -75,9 +98,53 @@ public:
   /// getTBAAInfoForVTablePtr - Get the TBAA MDNode to be used for a
   /// dereference of a vtable pointer.
   llvm::MDNode *getTBAAInfoForVTablePtr();
+
+  /// getTBAAStructInfo - Get the TBAAStruct MDNode to be used for a memcpy of
+  /// the given type.
+  llvm::MDNode *getTBAAStructInfo(QualType QTy);
+
+  /// Get the MDNode in the type DAG for given struct type QType.
+  llvm::MDNode *getTBAAStructTypeInfo(QualType QType);
+  /// Get the tag MDNode for a given base type, the actual sclar access MDNode
+  /// and offset into the base type.
+  llvm::MDNode *getTBAAStructTagInfo(QualType BaseQType,
+                                     llvm::MDNode *AccessNode, uint64_t Offset);
 };
 
 }  // end namespace CodeGen
 }  // end namespace clang
+
+namespace llvm {
+
+template<> struct DenseMapInfo<clang::CodeGen::TBAAPathTag> {
+  static clang::CodeGen::TBAAPathTag getEmptyKey() {
+    return clang::CodeGen::TBAAPathTag(
+      DenseMapInfo<const clang::Type *>::getEmptyKey(),
+      DenseMapInfo<const MDNode *>::getEmptyKey(),
+      DenseMapInfo<uint64_t>::getEmptyKey());
+  }
+
+  static clang::CodeGen::TBAAPathTag getTombstoneKey() {
+    return clang::CodeGen::TBAAPathTag(
+      DenseMapInfo<const clang::Type *>::getTombstoneKey(),
+      DenseMapInfo<const MDNode *>::getTombstoneKey(),
+      DenseMapInfo<uint64_t>::getTombstoneKey());
+  }
+
+  static unsigned getHashValue(const clang::CodeGen::TBAAPathTag &Val) {
+    return DenseMapInfo<const clang::Type *>::getHashValue(Val.BaseT) ^
+           DenseMapInfo<const MDNode *>::getHashValue(Val.AccessN) ^
+           DenseMapInfo<uint64_t>::getHashValue(Val.Offset);
+  }
+
+  static bool isEqual(const clang::CodeGen::TBAAPathTag &LHS,
+                      const clang::CodeGen::TBAAPathTag &RHS) {
+    return LHS.BaseT == RHS.BaseT &&
+           LHS.AccessN == RHS.AccessN &&
+           LHS.Offset == RHS.Offset;
+  }
+};
+
+}  // end namespace llvm
 
 #endif

@@ -18,6 +18,7 @@
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/TypeLoc.h"
+#include "llvm/Support/AlignOf.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 
@@ -33,7 +34,8 @@ NestedNameSpecifier::FindOrInsert(const ASTContext &Context,
   NestedNameSpecifier *NNS
     = Context.NestedNameSpecifiers.FindNodeOrInsertPos(ID, InsertPos);
   if (!NNS) {
-    NNS = new (Context, 4) NestedNameSpecifier(Mockup);
+    NNS = new (Context, llvm::alignOf<NestedNameSpecifier>())
+        NestedNameSpecifier(Mockup);
     Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
   }
 
@@ -55,7 +57,8 @@ NestedNameSpecifier::Create(const ASTContext &Context,
 
 NestedNameSpecifier *
 NestedNameSpecifier::Create(const ASTContext &Context,
-                            NestedNameSpecifier *Prefix, NamespaceDecl *NS) {
+                            NestedNameSpecifier *Prefix,
+                            const NamespaceDecl *NS) {
   assert(NS && "Namespace cannot be NULL");
   assert((!Prefix ||
           (Prefix->getAsType() == 0 && Prefix->getAsIdentifier() == 0)) &&
@@ -63,7 +66,7 @@ NestedNameSpecifier::Create(const ASTContext &Context,
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(Prefix);
   Mockup.Prefix.setInt(StoredNamespaceOrAlias);
-  Mockup.Specifier = NS;
+  Mockup.Specifier = const_cast<NamespaceDecl *>(NS);
   return FindOrInsert(Context, Mockup);
 }
 
@@ -107,7 +110,9 @@ NestedNameSpecifier::Create(const ASTContext &Context, IdentifierInfo *II) {
 NestedNameSpecifier *
 NestedNameSpecifier::GlobalSpecifier(const ASTContext &Context) {
   if (!Context.GlobalNestedNameSpecifier)
-    Context.GlobalNestedNameSpecifier = new (Context, 4) NestedNameSpecifier();
+    Context.GlobalNestedNameSpecifier =
+        new (Context, llvm::alignOf<NestedNameSpecifier>())
+            NestedNameSpecifier();
   return Context.GlobalNestedNameSpecifier;
 }
 
@@ -244,7 +249,6 @@ NestedNameSpecifier::print(raw_ostream &OS,
     // Fall through to print the type.
 
   case TypeSpec: {
-    std::string TypeStr;
     const Type *T = getAsType();
 
     PrintingPolicy InnerPolicy(Policy);
@@ -266,15 +270,12 @@ NestedNameSpecifier::print(raw_ostream &OS,
       SpecType->getTemplateName().print(OS, InnerPolicy, true);
 
       // Print the template argument list.
-      TypeStr = TemplateSpecializationType::PrintTemplateArgumentList(
-                                                          SpecType->getArgs(),
-                                                       SpecType->getNumArgs(),
-                                                                 InnerPolicy);
+      TemplateSpecializationType::PrintTemplateArgumentList(
+          OS, SpecType->getArgs(), SpecType->getNumArgs(), InnerPolicy);
     } else {
       // Print the type normally
-      TypeStr = QualType(T, 0).getAsString(InnerPolicy);
+      QualType(T, 0).print(OS, InnerPolicy);
     }
-    OS << TypeStr;
     break;
   }
   }
@@ -630,4 +631,3 @@ NestedNameSpecifierLocBuilder::getWithLocInContext(ASTContext &Context) const {
   memcpy(Mem, Buffer, BufferSize);
   return NestedNameSpecifierLoc(Representation, Mem);
 }
-

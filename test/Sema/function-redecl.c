@@ -92,8 +92,6 @@ void outer_test3() {
   int *(*fp)(int) = outer8; // expected-error{{use of undeclared identifier 'outer8'}}
 }
 
-static float outer8(float); // okay
-
 enum e { e1, e2 };
 
 // GNU extension: prototypes and K&R function definitions
@@ -129,3 +127,7 @@ void test_x() {
 enum e0 {one}; 
 void f3(); 
 void f3(enum e0 x) {}
+
+enum incomplete_enum;
+void f4(); // expected-note {{previous declaration is here}}
+void f4(enum incomplete_enum); // expected-error {{conflicting types for 'f4'}}

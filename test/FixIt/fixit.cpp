@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -pedantic -Wall -Wno-comment -verify -fcxx-exceptions -x c++ %s
+// RUN: %clang_cc1 -fsyntax-only -fdiagnostics-parseable-fixits -x c++ %s 2>&1 | FileCheck %s
 // RUN: cp %s %t
 // RUN: not %clang_cc1 -pedantic -Wall -Wno-comment -fcxx-exceptions -fixit -x c++ %t
 // RUN: %clang_cc1 -fsyntax-only -pedantic -Wall -Werror -Wno-comment -fcxx-exceptions -x c++ %t
@@ -54,7 +55,7 @@ namespace rdar7853795 {
 }
 
 namespace rdar7796492 {
-  class A { int x, y; A(); };
+  struct A { int x, y; A(); };
 
   A::A()
     : x(1) y(2) { // expected-error{{missing ',' between base or member initializers}}
@@ -64,7 +65,7 @@ namespace rdar7796492 {
 
 // extra qualification on member
 class C {
-  int C::foo(); // expected-warning {{extra qualification}}
+  int C::foo(); // expected-error {{extra qualification}}
 };
 
 namespace rdar8488464 {
@@ -219,6 +220,7 @@ void Foo::SetBar(Bar bar) { bar_ = bar; } // expected-error {{must use 'enum' ta
 
 #define NULL __null
 char c = NULL; // expected-warning {{implicit conversion of NULL constant to 'char'}}
+double dbl = NULL; // expected-warning {{implicit conversion of NULL constant to 'double'}}
 
 namespace arrow_suggest {
 
@@ -242,3 +244,66 @@ void test() {
 }
 
 } // namespace arrow_suggest
+
+// Make sure fixing namespace-qualified identifiers functions properly with
+// namespace-aware typo correction/
+namespace redecl_typo {
+namespace Foo {
+  void BeEvil(); // expected-note {{'BeEvil' declared here}}
+}
+namespace Bar {
+  namespace Foo {
+    bool isGood(); // expected-note {{'Bar::Foo::isGood' declared here}}
+    void beEvil();
+  }
+}
+bool Foo::isGood() { // expected-error {{out-of-line definition of 'isGood' does not match any declaration in namespace 'redecl_typo::Foo'; did you mean 'Bar::Foo::isGood'?}}
+  return true;
+}
+void Foo::beEvil() {} // expected-error {{out-of-line definition of 'beEvil' does not match any declaration in namespace 'redecl_typo::Foo'; did you mean 'BeEvil'?}}
+}
+
+// Test behavior when a template-id is ended by a token which starts with '>'.
+namespace greatergreater {
+  template<typename T> struct S { S(); S(T); };
+  void f(S<int>=0); // expected-error {{a space is required between a right angle bracket and an equals sign (use '> =')}}
+
+  // FIXME: The fix-its here overlap so -fixit mode can't apply the second one.
+  //void f(S<S<int>>=S<int>());
+
+  struct Shr {
+    template<typename T> Shr(T);
+    template<typename T> void operator >>=(T);
+  };
+
+  template<template<typename>> struct TemplateTemplateParam; // expected-error {{requires 'class'}}
+
+  template<typename T> void t();
+  void g() {
+    void (*p)() = &t<int>;
+    (void)(&t<int>==p); // expected-error {{use '> ='}}
+    (void)(&t<int>>=p); // expected-error {{use '> >'}}
+    (void)(&t<S<int>>>=p); // expected-error {{use '> >'}}
+    (Shr)&t<S<int>>>>=p; // expected-error {{use '> >'}}
+
+    // FIXME: We correct this to '&t<int> > >= p;' not '&t<int> >>= p;'
+    //(Shr)&t<int>>>=p;
+
+    // FIXME: The fix-its here overlap.
+    //(void)(&t<S<int>>==p);
+  }
+}
+
+class foo {
+  static void test() {
+    (void)&i; // expected-error{{must explicitly qualify name of member function when taking its address}}
+  }
+  int i();
+};
+
+namespace dtor_fixit {
+  class foo {
+    ~bar() { }  // expected-error {{expected the class name after '~' to name a destructor}}
+    // CHECK: fix-it:"{{.*}}":{[[@LINE-1]]:6-[[@LINE-1]]:9}:"foo"
+  };
+}

@@ -78,8 +78,9 @@ namespace clang {
     ICK_Vector_Splat,          ///< A vector splat from an arithmetic type
     ICK_Complex_Real,          ///< Complex-real conversions (C99 6.3.1.7)
     ICK_Block_Pointer_Conversion,    ///< Block Pointer conversions 
-    ICK_TransparentUnionConversion, /// Transparent Union Conversions
+    ICK_TransparentUnionConversion, ///< Transparent Union Conversions
     ICK_Writeback_Conversion,  ///< Objective-C ARC writeback conversion
+    ICK_Zero_Event_Conversion, ///< Zero constant to event (OpenCL1.2 6.12.10)
     ICK_Num_Conversion_Kinds   ///< The number of conversion kinds
   };
 
@@ -659,12 +660,25 @@ namespace clang {
     /// A structure used to record information about a failed
     /// template argument deduction.
     struct DeductionFailureInfo {
-      // A Sema::TemplateDeductionResult.
-      unsigned Result;
+      /// A Sema::TemplateDeductionResult.
+      unsigned Result : 8;
+
+      /// \brief Indicates whether a diagnostic is stored in Diagnostic.
+      unsigned HasDiagnostic : 1;
 
       /// \brief Opaque pointer containing additional data about
       /// this deduction failure.
       void *Data;
+
+      /// \brief A diagnostic indicating why deduction failed.
+      union {
+        void *Align;
+        char Diagnostic[sizeof(PartialDiagnosticAt)];
+      };
+
+      /// \brief Retrieve the diagnostic which caused this deduction failure,
+      /// if any.
+      PartialDiagnosticAt *getSFINAEDiagnostic();
       
       /// \brief Retrieve the template parameter this deduction failure
       /// refers to, if any.
@@ -681,6 +695,10 @@ namespace clang {
       /// \brief Return the second template argument this deduction failure
       /// refers to, if any.
       const TemplateArgument *getSecondArg();
+
+      /// \brief Return the expression this deduction failure refers to,
+      /// if any.
+      Expr *getExpr();
       
       /// \brief Free any memory associated with this deduction failure.
       void Destroy();
@@ -735,16 +753,14 @@ namespace clang {
     unsigned NumInlineSequences;
     char InlineSpace[16 * sizeof(ImplicitConversionSequence)];
 
-    OverloadCandidateSet(const OverloadCandidateSet &);
-    OverloadCandidateSet &operator=(const OverloadCandidateSet &);
-    
+    OverloadCandidateSet(const OverloadCandidateSet &) LLVM_DELETED_FUNCTION;
+    void operator=(const OverloadCandidateSet &) LLVM_DELETED_FUNCTION;
+
+    void destroyCandidates();
+
   public:
     OverloadCandidateSet(SourceLocation Loc) : Loc(Loc), NumInlineSequences(0){}
-    ~OverloadCandidateSet() {
-      for (iterator i = begin(), e = end(); i != e; ++i)
-        for (unsigned ii = 0, ie = i->NumConversions; ii != ie; ++ii)
-          i->Conversions[ii].~ImplicitConversionSequence();
-    }
+    ~OverloadCandidateSet() { destroyCandidates(); }
 
     SourceLocation getLocation() const { return Loc; }
 
@@ -798,8 +814,8 @@ namespace clang {
 
     void NoteCandidates(Sema &S,
                         OverloadCandidateDisplayKind OCD,
-                        llvm::ArrayRef<Expr *> Args,
-                        const char *Opc = 0,
+                        ArrayRef<Expr *> Args,
+                        StringRef Opc = "",
                         SourceLocation Loc = SourceLocation());
   };
 
