@@ -996,7 +996,7 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
 
   case DeclSpec::TST_auto: {
     // TypeQuals handled by caller.
-    Result = Context.getAutoType(QualType());
+    Result = Context.getAutoType(QualType(), /*decltype(auto)*/false);
     break;
   }
 

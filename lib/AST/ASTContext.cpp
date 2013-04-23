@@ -3527,18 +3527,20 @@ QualType ASTContext::getUnaryTransformType(QualType BaseType,
 
 /// getAutoType - Return the uniqued reference to the 'auto' type which has been
 /// deduced to the given type, or to the canonical undeduced 'auto' type.
-QualType ASTContext::getAutoType(QualType DeducedType) const {
-  if (DeducedType.isNull())
+QualType ASTContext::getAutoType(QualType DeducedType,
+                                 bool IsDecltypeAuto) const {
+  if (DeducedType.isNull() && !IsDecltypeAuto)
     return getAutoDeductType();
 
   // Look in the folding set for an existing type.
   void *InsertPos = 0;
   llvm::FoldingSetNodeID ID;
-  AutoType::Profile(ID, DeducedType);
+  AutoType::Profile(ID, DeducedType, IsDecltypeAuto);
   if (AutoType *AT = AutoTypes.FindNodeOrInsertPos(ID, InsertPos))
     return QualType(AT, 0);
 
-  AutoType *AT = new (*this, TypeAlignment) AutoType(DeducedType);
+  AutoType *AT = new (*this, TypeAlignment) AutoType(DeducedType,
+                                                     IsDecltypeAuto);
   Types.push_back(AT);
   if (InsertPos)
     AutoTypes.InsertNode(AT, InsertPos);
@@ -3576,7 +3578,9 @@ QualType ASTContext::getAtomicType(QualType T) const {
 /// getAutoDeductType - Get type pattern for deducing against 'auto'.
 QualType ASTContext::getAutoDeductType() const {
   if (AutoDeductTy.isNull())
-    AutoDeductTy = QualType(new (*this, TypeAlignment) AutoType(QualType()), 0);
+    AutoDeductTy = QualType(
+      new (*this, TypeAlignment) AutoType(QualType(), /*decltype(auto)*/false),
+      0);
   return AutoDeductTy;
 }
 
