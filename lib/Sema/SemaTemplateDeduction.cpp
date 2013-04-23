@@ -3579,11 +3579,13 @@ namespace {
       // auto type deduced as T" in order for [temp.deduct.call]p3 to apply.
       if (!Replacement.isNull() && isa<TemplateTypeParmType>(Replacement)) {
         QualType Result = Replacement;
-        TemplateTypeParmTypeLoc NewTL = TLB.push<TemplateTypeParmTypeLoc>(Result);
+        TemplateTypeParmTypeLoc NewTL =
+          TLB.push<TemplateTypeParmTypeLoc>(Result);
         NewTL.setNameLoc(TL.getNameLoc());
         return Result;
       } else {
-        QualType Result = RebuildAutoType(Replacement);
+        QualType Result = RebuildAutoType(Replacement,
+                                          TL.getTypePtr()->isDecltypeAuto());
         AutoTypeLoc NewTL = TLB.push<AutoTypeLoc>(Result);
         NewTL.setNameLoc(TL.getNameLoc());
         return Result;
