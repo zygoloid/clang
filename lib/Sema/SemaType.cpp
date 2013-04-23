@@ -994,11 +994,14 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
     }
     break;
 
-  case DeclSpec::TST_auto: {
+  case DeclSpec::TST_auto:
     // TypeQuals handled by caller.
     Result = Context.getAutoType(QualType(), /*decltype(auto)*/false);
     break;
-  }
+
+  case DeclSpec::TST_decltype_auto:
+    Result = Context.getAutoType(QualType(), /*decltype(auto)*/true);
+    break;
 
   case DeclSpec::TST_unknown_anytype:
     Result = Context.UnknownAnyTy;
@@ -2063,7 +2066,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
   // In C++11, a function declarator using 'auto' must have a trailing return
   // type (this is checked later) and we can skip this. In other languages
   // using auto, we need to check regardless.
-  if (D.getDeclSpec().getTypeSpecType() == DeclSpec::TST_auto &&
+  if (D.getDeclSpec().containsPlaceholderType() &&
       (!SemaRef.getLangOpts().CPlusPlus11 || !D.isFunctionDeclarator())) {
     int Error = -1;
 
@@ -2562,7 +2565,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
               << T << D.getDeclSpec().getSourceRange();
             D.setInvalidType(true);
           } else if (D.getContext() != Declarator::LambdaExprContext &&
-                     (T.hasQualifiers() || !isa<AutoType>(T))) {
+                     (T.hasQualifiers() || !isa<AutoType>(T) ||
+                      cast<AutoType>(T)->isDecltypeAuto())) {
             S.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
                  diag::err_trailing_return_without_auto)
               << T << D.getDeclSpec().getSourceRange();

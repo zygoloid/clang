@@ -1461,6 +1461,10 @@ def warn_dangling_std_initializer_list : Warning<
   "%select{the full-expression|the constructor}0">,
   InGroup<DiagGroup<"dangling-initializer-list">>;
 
+// C++1y decltype(auto) type
+def err_decltype_auto_initializer_list : Error<
+  "cannot deduce 'decltype(auto)' from initializer list">;
+
 // C++1y auto type
 def err_auto_fn_deduction_failure : Error<
   "cannot deduce return type %0 from returned value of type %1">;

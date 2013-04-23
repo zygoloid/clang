@@ -294,6 +294,11 @@ bool Declarator::isDeclarationOfFunction() const {
     case TST_event_t:
       return false;
 
+    case TST_decltype_auto:
+      // This must have an initializer, so can't be a function declaration,
+      // even if the initializer has function type.
+      return false;
+
     case TST_decltype:
     case TST_typeofExpr:
       if (Expr *E = DS.getRepAsExpr())
@@ -434,6 +439,7 @@ const char *DeclSpec::getSpecifierName(DeclSpec::TST T) {
   case DeclSpec::TST_typeofExpr:  return "typeof";
   case DeclSpec::TST_auto:        return "auto";
   case DeclSpec::TST_decltype:    return "(decltype)";
+  case DeclSpec::TST_decltype_auto: return "decltype(auto)";
   case DeclSpec::TST_underlyingType: return "__underlying_type";
   case DeclSpec::TST_unknown_anytype: return "__unknown_anytype";
   case DeclSpec::TST_atomic: return "_Atomic";
@@ -494,7 +500,7 @@ bool DeclSpec::SetStorageClassSpec(Sema &S, SCS SC, SourceLocation Loc,
   }
 
   if (StorageClassSpec != SCS_unspecified) {
-    // Maybe this is an attempt to use C++0x 'auto' outside of C++0x mode.
+    // Maybe this is an attempt to use C++11 'auto' outside of C++11 mode.
     bool isInvalid = true;
     if (TypeSpecType == TST_unspecified && S.getLangOpts().CPlusPlus) {
       if (SC == SCS_auto)
@@ -973,7 +979,7 @@ void DeclSpec::Finish(DiagnosticsEngine &D, Preprocessor &PP) {
     StorageClassSpecLoc = SourceLocation();
   }
   // Diagnose if we've recovered from an ill-formed 'auto' storage class
-  // specifier in a pre-C++0x dialect of C++.
+  // specifier in a pre-C++11 dialect of C++.
   if (!PP.getLangOpts().CPlusPlus11 && TypeSpecType == TST_auto)
     Diag(D, TSTLoc, diag::ext_auto_type_specifier);
   if (PP.getLangOpts().CPlusPlus && !PP.getLangOpts().CPlusPlus11 &&
