@@ -78,6 +78,8 @@ void ASTStmtWriter::VisitCompoundStmt(CompoundStmt *S) {
 void ASTStmtWriter::VisitSwitchCase(SwitchCase *S) {
   VisitStmt(S);
   Record.push_back(Writer.getSwitchCaseID(S));
+  Writer.AddSourceLocation(S->getKeywordLoc(), Record);
+  Writer.AddSourceLocation(S->getColonLoc(), Record);
 }
 
 void ASTStmtWriter::VisitCaseStmt(CaseStmt *S) {
@@ -85,17 +87,13 @@ void ASTStmtWriter::VisitCaseStmt(CaseStmt *S) {
   Writer.AddStmt(S->getLHS());
   Writer.AddStmt(S->getRHS());
   Writer.AddStmt(S->getSubStmt());
-  Writer.AddSourceLocation(S->getCaseLoc(), Record);
   Writer.AddSourceLocation(S->getEllipsisLoc(), Record);
-  Writer.AddSourceLocation(S->getColonLoc(), Record);
   Code = serialization::STMT_CASE;
 }
 
 void ASTStmtWriter::VisitDefaultStmt(DefaultStmt *S) {
   VisitSwitchCase(S);
   Writer.AddStmt(S->getSubStmt());
-  Writer.AddSourceLocation(S->getDefaultLoc(), Record);
-  Writer.AddSourceLocation(S->getColonLoc(), Record);
   Code = serialization::STMT_DEFAULT;
 }
 
@@ -257,6 +255,13 @@ void ASTStmtWriter::VisitMSAsmStmt(MSAsmStmt *S) {
   Code = serialization::STMT_MSASM;
 }
 
+void ASTStmtWriter::VisitCapturedStmt(CapturedStmt *S) {
+  VisitStmt(S);
+  Code = serialization::STMT_CAPTURED;
+
+  llvm_unreachable("not implemented yet");
+}
+
 void ASTStmtWriter::VisitExpr(Expr *E) {
   VisitStmt(E);
   Writer.AddTypeRef(E->getType(), Record);
@@ -326,8 +331,9 @@ void ASTStmtWriter::VisitIntegerLiteral(IntegerLiteral *E) {
 
 void ASTStmtWriter::VisitFloatingLiteral(FloatingLiteral *E) {
   VisitExpr(E);
-  Writer.AddAPFloat(E->getValue(), Record);
+  Record.push_back(E->getRawSemantics());
   Record.push_back(E->isExact());
+  Writer.AddAPFloat(E->getValue(), Record);
   Writer.AddSourceLocation(E->getLocation(), Record);
   Code = serialization::EXPR_FLOATING_LITERAL;
 }
@@ -499,6 +505,7 @@ void ASTStmtWriter::VisitObjCIsaExpr(ObjCIsaExpr *E) {
   VisitExpr(E);
   Writer.AddStmt(E->getBase());
   Writer.AddSourceLocation(E->getIsaMemberLoc(), Record);
+  Writer.AddSourceLocation(E->getOpLoc(), Record);
   Record.push_back(E->isArrow());
   Code = serialization::EXPR_OBJC_ISA;
 }
@@ -536,6 +543,7 @@ void ASTStmtWriter::VisitBinaryOperator(BinaryOperator *E) {
   Writer.AddStmt(E->getRHS());
   Record.push_back(E->getOpcode()); // FIXME: stable encoding
   Writer.AddSourceLocation(E->getOperatorLoc(), Record);
+  Record.push_back(E->isFPContractable());
   Code = serialization::EXPR_BINARY_OPERATOR;
 }
 
@@ -605,6 +613,8 @@ void ASTStmtWriter::VisitExtVectorElementExpr(ExtVectorElementExpr *E) {
 
 void ASTStmtWriter::VisitInitListExpr(InitListExpr *E) {
   VisitExpr(E);
+  // NOTE: only add the (possibly null) syntactic form.
+  // No need to serialize the isSemanticForm flag and the semantic form.
   Writer.AddStmt(E->getSyntacticForm());
   Writer.AddSourceLocation(E->getLBraceLoc(), Record);
   Writer.AddSourceLocation(E->getRBraceLoc(), Record);
@@ -854,6 +864,7 @@ void ASTStmtWriter::VisitObjCIvarRefExpr(ObjCIvarRefExpr *E) {
   VisitExpr(E);
   Writer.AddDeclRef(E->getDecl(), Record);
   Writer.AddSourceLocation(E->getLocation(), Record);
+  Writer.AddSourceLocation(E->getOpLoc(), Record);
   Writer.AddStmt(E->getBase());
   Record.push_back(E->isArrow());
   Record.push_back(E->isFreeIvar());
@@ -1055,6 +1066,7 @@ void ASTStmtWriter::VisitCXXOperatorCallExpr(CXXOperatorCallExpr *E) {
   VisitCallExpr(E);
   Record.push_back(E->getOperator());
   Writer.AddSourceRange(E->Range, Record);
+  Record.push_back(E->isFPContractable());
   Code = serialization::EXPR_CXX_OPERATOR_CALL;
 }
 
@@ -1072,6 +1084,7 @@ void ASTStmtWriter::VisitCXXConstructExpr(CXXConstructExpr *E) {
   Writer.AddSourceLocation(E->getLocation(), Record);
   Record.push_back(E->isElidable());
   Record.push_back(E->hadMultipleCandidates());
+  Record.push_back(E->isListInitialization());
   Record.push_back(E->requiresZeroInitialization());
   Record.push_back(E->getConstructionKind()); // FIXME: stable encoding
   Writer.AddSourceRange(E->getParenRange(), Record);
@@ -1120,6 +1133,7 @@ void ASTStmtWriter::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
   VisitExplicitCastExpr(E);
   Writer.AddSourceRange(SourceRange(E->getOperatorLoc(), E->getRParenLoc()),
                         Record);
+  Writer.AddSourceRange(E->getAngleBrackets(), Record);
 }
 
 void ASTStmtWriter::VisitCXXStaticCastExpr(CXXStaticCastExpr *E) {
@@ -1209,6 +1223,13 @@ void ASTStmtWriter::VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
   Code = serialization::EXPR_CXX_DEFAULT_ARG;
 }
 
+void ASTStmtWriter::VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) {
+  VisitExpr(E);
+  Writer.AddDeclRef(E->getField(), Record);
+  Writer.AddSourceLocation(E->getExprLoc(), Record);
+  Code = serialization::EXPR_CXX_DEFAULT_INIT;
+}
+
 void ASTStmtWriter::VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E) {
   VisitExpr(E);
   Writer.AddCXXTemporary(E->getTemporary(), Record);
@@ -1234,7 +1255,7 @@ void ASTStmtWriter::VisitCXXNewExpr(CXXNewExpr *E) {
   Writer.AddDeclRef(E->getOperatorDelete(), Record);
   Writer.AddTypeSourceInfo(E->getAllocatedTypeSourceInfo(), Record);
   Writer.AddSourceRange(E->getTypeIdParens(), Record);
-  Writer.AddSourceLocation(E->getStartLoc(), Record);
+  Writer.AddSourceRange(E->getSourceRange(), Record);
   Writer.AddSourceRange(E->getDirectInitRange(), Record);
   for (CXXNewExpr::arg_iterator I = E->raw_arg_begin(), e = E->raw_arg_end();
        I != e; ++I)
@@ -1383,8 +1404,6 @@ void ASTStmtWriter::VisitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
 void ASTStmtWriter::VisitUnresolvedLookupExpr(UnresolvedLookupExpr *E) {
   VisitOverloadExpr(E);
   Record.push_back(E->requiresADL());
-  if (E->requiresADL())
-    Record.push_back(E->isStdAssociatedNamespace());
   Record.push_back(E->isOverloaded());
   Writer.AddDeclRef(E->getNamingClass(), Record);
   Code = serialization::EXPR_CXX_UNRESOLVED_LOOKUP;
@@ -1529,6 +1548,16 @@ void ASTStmtWriter::VisitAsTypeExpr(AsTypeExpr *E) {
 //===----------------------------------------------------------------------===//
 // Microsoft Expressions and Statements.
 //===----------------------------------------------------------------------===//
+void ASTStmtWriter::VisitMSPropertyRefExpr(MSPropertyRefExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->isArrow());
+  Writer.AddStmt(E->getBaseExpr());
+  Writer.AddNestedNameSpecifierLoc(E->getQualifierLoc(), Record);
+  Writer.AddSourceLocation(E->getMemberLoc(), Record);
+  Writer.AddDeclRef(E->getPropertyDecl(), Record);
+  Code = serialization::EXPR_CXX_PROPERTY_REF_EXPR;
+}
+
 void ASTStmtWriter::VisitCXXUuidofExpr(CXXUuidofExpr *E) {
   VisitExpr(E);
   Writer.AddSourceRange(E->getSourceRange(), Record);

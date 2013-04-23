@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "IndexingContext.h"
-
 #include "RecursiveASTVisitor.h"
 
 using namespace clang;
@@ -87,6 +86,12 @@ public:
 
     // No need to do a handleReference for the objc method, because there will
     // be a message expr as part of PseudoObjectExpr.
+    return true;
+  }
+
+  bool VisitMSPropertyRefExpr(MSPropertyRefExpr *E) {
+    IndexCtx.handleReference(E->getPropertyDecl(), E->getMemberLoc(), Parent,
+                             ParentDC, E, CXIdxEntityRef_Direct);
     return true;
   }
 

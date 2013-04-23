@@ -62,13 +62,21 @@ namespace clang {
     TST_auto,         // C++0x auto
     TST_unknown_anytype, // __unknown_anytype extension
     TST_atomic,       // C11 _Atomic
+    TST_image1d_t,        // OpenCL image1d_t
+    TST_image1d_array_t,  // OpenCL image1d_array_t
+    TST_image1d_buffer_t, // OpenCL image1d_buffer_t
+    TST_image2d_t,        // OpenCL image2d_t
+    TST_image2d_array_t,  // OpenCL image2d_array_t
+    TST_image3d_t,        // OpenCL image3d_t
+    TST_sampler_t,        // OpenCL sampler_t
+    TST_event_t,          // OpenCL event_t
     TST_error         // erroneous type
   };
   
   /// \brief Structure that packs information about the type specifiers that
   /// were written in a particular type specifier sequence.
   struct WrittenBuiltinSpecs {
-    /*DeclSpec::TST*/ unsigned Type  : 5;
+    /*DeclSpec::TST*/ unsigned Type  : 6;
     /*DeclSpec::TSS*/ unsigned Sign  : 2;
     /*DeclSpec::TSW*/ unsigned Width : 2;
     bool ModeAttr : 1;
@@ -175,6 +183,21 @@ namespace clang {
     ICIS_CopyInit, ///< Copy initialization.
     ICIS_ListInit  ///< Direct list-initialization.
   };
+
+  /// \brief CallingConv - Specifies the calling convention that a function uses.
+  enum CallingConv {
+    CC_Default,
+    CC_C,           // __attribute__((cdecl))
+    CC_X86StdCall,  // __attribute__((stdcall))
+    CC_X86FastCall, // __attribute__((fastcall))
+    CC_X86ThisCall, // __attribute__((thiscall))
+    CC_X86Pascal,   // __attribute__((pascal))
+    CC_AAPCS,       // __attribute__((pcs("aapcs")))
+    CC_AAPCS_VFP,   // __attribute__((pcs("aapcs-vfp")))
+    CC_PnaclCall,   // __attribute__((pnaclcall))
+    CC_IntelOclBicc // __attribute__((intel_ocl_bicc))
+  };
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_BASIC_SPECIFIERS_H

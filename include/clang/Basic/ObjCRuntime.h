@@ -104,7 +104,7 @@ public:
     return true;
   }
 
-  /// \brief Is this runtime basically of the GNUstep family of runtimes?
+  /// \brief Is this runtime basically of the GNU family of runtimes?
   bool isGNUFamily() const {
     switch (getKind()) {
     case FragileMacOSX:
@@ -157,6 +157,21 @@ public:
     llvm_unreachable("bad kind");
   }
 
+  /// \brief Does this runtime supports optimized setter entrypoints?
+  bool hasOptimizedSetter() const {
+    switch (getKind()) {
+      case MacOSX:
+        return getVersion() >= VersionTuple(10, 8);
+      case iOS:
+        return (getVersion() >= VersionTuple(6));
+      case GNUstep:
+        return getVersion() >= VersionTuple(1, 7);
+    
+      default:
+      return false;
+    }
+  }
+
   /// Does this runtime allow the use of __weak?
   bool allowsWeak() const {
     return hasNativeWeak();
@@ -177,7 +192,7 @@ public:
     switch (getKind()) {
     case FragileMacOSX: return false;
     case MacOSX: return getVersion() >= VersionTuple(10, 8);
-    case iOS: return false;
+    case iOS: return getVersion() >= VersionTuple(6);
 
     // This is really a lie, because some implementations and versions
     // of the runtime do not support ARC.  Probably -fgnu-runtime
@@ -257,6 +272,18 @@ public:
     case ObjFW: return true;
     }
     llvm_unreachable("bad kind");
+  }
+
+  bool hasAtomicCopyHelper() const {
+    switch (getKind()) {
+    case FragileMacOSX:
+    case MacOSX:
+    case iOS:
+      return true;
+    case GNUstep:
+      return getVersion() >= VersionTuple(1, 7);
+    default: return false;
+    }
   }
 
   /// \brief Try to parse an Objective-C runtime specification from the given
