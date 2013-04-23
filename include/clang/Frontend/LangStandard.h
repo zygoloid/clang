@@ -75,9 +75,6 @@ public:
   /// isCPlusPlus1y - Language is a C++1y variant.
   bool isCPlusPlus1y() const { return Flags & frontend::CPlusPlus1y; }
 
-  /// isCPlusPlus1y - Language is a C++1y variant.
-  bool isCPlusPlus1y() const { return Flags & frontend::CPlusPlus1y; }
-
   /// hasDigraphs - Language supports digraphs.
   bool hasDigraphs() const { return Flags & frontend::Digraphs; }
 

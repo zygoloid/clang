@@ -385,3 +385,5 @@ void Module::print(raw_ostream &OS, unsigned Indent) const {
 void Module::dump() const {
   print(llvm::errs());
 }
+
+
