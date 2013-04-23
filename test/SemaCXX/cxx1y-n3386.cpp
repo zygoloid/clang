@@ -105,7 +105,7 @@ namespace Templates {
   int e = fwd_decl<int>(); // expected-error {{cannot be used before it is defined}}
   template<typename T> auto fwd_decl() { return 0; }
   int f = fwd_decl<int>();
-  template<typename T> auto fwd_decl();
+  template<typename T> auto fwd_decl(); // expected-note {{declared here}}
   int g = fwd_decl<char>();
 
   auto (*p)() = f1; // expected-error {{incompatible initializer}}
