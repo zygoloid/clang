@@ -40,5 +40,15 @@ decltype(auto) x6d = { 1, 2 }; // expected-error {{cannot deduce 'decltype(auto)
 using InitListInt = decltype(x6a);
 
 auto *x7a = &i;
-decltype(auto) *x7d = &i; // expected-error {{something}}
+decltype(auto) *x7d = &i; // expected-error {{'decltype(auto)' cannot be used to form a compound type}}
 using IntPtr = decltype(x7a);
+
+decltype(auto) f1();
+decltype(auto) (*f2)(); // expected-error {{'decltype(auto)' cannot be used to form a compound type}} expected-error {{requires an initializer}}
+decltype(auto) *f3(); // expected-error {{'decltype(auto)' cannot be used to form a compound type}}
+const decltype(auto) f4(); // expected-error {{'decltype(auto)' cannot be combined with other type specifiers}}
+typedef decltype(auto) f5(); // expected-error {{'decltype(auto)' cannot be used to form a compound type}}
+decltype(auto) ((((((f6))))())); // ok
+decltype(auto) f7()(); // expected-error {{function cannot return function type}}
+
+decltype(auto) ((((((v)))))) = 0; // ok

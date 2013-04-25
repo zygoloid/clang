@@ -840,6 +840,39 @@ void DeclSpec::Finish(DiagnosticsEngine &D, Preprocessor &PP) {
 
   // Check the type specifier components first.
 
+  // If decltype(auto) is used, no other type specifiers are permitted.
+  if (TypeSpecType == TST_decltype_auto &&
+      (TypeSpecWidth != TSW_unspecified ||
+       TypeSpecComplex != TSC_unspecified ||
+       TypeSpecSign != TSS_unspecified ||
+       TypeAltiVecVector || TypeAltiVecPixel || TypeAltiVecBool ||
+       TypeQualifiers)) {
+    const int NumLocs = 8;
+    SourceLocation ExtraLocs[NumLocs] = {
+      TSWLoc, TSCLoc, TSSLoc, AltiVecLoc,
+      TQ_constLoc, TQ_restrictLoc, TQ_volatileLoc, TQ_atomicLoc
+    };
+    FixItHint Hints[NumLocs];
+    SourceLocation FirstLoc;
+    for (unsigned I = 0; I != NumLocs; ++I) {
+      if (!ExtraLocs[I].isInvalid()) {
+        if (FirstLoc.isInvalid() ||
+            PP.getSourceManager().isBeforeInTranslationUnit(ExtraLocs[I],
+                                                            FirstLoc))
+          FirstLoc = ExtraLocs[I];
+        Hints[I] = FixItHint::CreateRemoval(ExtraLocs[I]);
+      }
+    }
+    TypeSpecWidth = TSW_unspecified;
+    TypeSpecComplex = TSC_unspecified;
+    TypeSpecSign = TSS_unspecified;
+    TypeAltiVecVector = TypeAltiVecPixel = TypeAltiVecBool = false;
+    TypeQualifiers = 0;
+    Diag(D, TSTLoc, diag::err_decltype_auto_cannot_be_combined)
+      << Hints[0] << Hints[1] << Hints[2] << Hints[3]
+      << Hints[4] << Hints[5] << Hints[6] << Hints[7];
+  }
+
   // Validate and finalize AltiVec vector declspec.
   if (TypeAltiVecVector) {
     if (TypeAltiVecBool) {

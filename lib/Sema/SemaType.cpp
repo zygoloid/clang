@@ -2406,6 +2406,31 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       (T->castAs<FunctionProtoType>()->getTypeQuals() != 0 ||
        T->castAs<FunctionProtoType>()->getRefQualifier() != RQ_None);
 
+  // If T is 'decltype(auto)', the only declarators we can have are parens
+  // and at most one function declarator if this is a function declaration.
+  if (const AutoType *AT = T->getAs<AutoType>()) {
+    if (AT->isDecltypeAuto()) {
+      bool SeenFunction = false;
+      for (unsigned I = 0, E = D.getNumTypeObjects(); I != E; ++I) {
+        DeclaratorChunk &DeclChunk = D.getTypeObject(I);
+        switch (DeclChunk.Kind) {
+        case DeclaratorChunk::Paren:
+          continue;
+        case DeclaratorChunk::Function:
+          // Multiple function declarators with no other chunks is an error
+          // anyway (functions can't return functions) so no need to diagnose.
+          if (D.isFunctionDeclarationContext())
+            continue;
+          // Fall through.
+        default:
+          S.Diag(DeclChunk.Loc, diag::err_decltype_auto_compound_type);
+          D.setInvalidType(true);
+          break;
+        }
+      }
+    }
+  }
+
   // Walk the DeclTypeInfo, building the recursive type as we go.
   // DeclTypeInfos are ordered from the identifier out, which is
   // opposite of what we want :).

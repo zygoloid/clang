@@ -1462,6 +1462,10 @@ def warn_dangling_std_initializer_list : Warning<
   InGroup<DiagGroup<"dangling-initializer-list">>;
 
 // C++1y decltype(auto) type
+def err_decltype_auto_cannot_be_combined : Error<
+  "'decltype(auto)' cannot be combined with other type specifiers">;
+def err_decltype_auto_compound_type : Error<
+  "'decltype(auto)' cannot be used to form a compound type">;
 def err_decltype_auto_initializer_list : Error<
   "cannot deduce 'decltype(auto)' from initializer list">;
 
