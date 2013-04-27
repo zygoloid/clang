@@ -2026,6 +2026,8 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
   // The TagDecl owned by the DeclSpec.
   TagDecl *OwnedTagDecl = 0;
 
+  bool ContainsPlaceholderType = false;
+
   switch (D.getName().getKind()) {
   case UnqualifiedId::IK_ImplicitSelfParam:
   case UnqualifiedId::IK_OperatorFunctionId:
@@ -2033,6 +2035,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
   case UnqualifiedId::IK_LiteralOperatorId:
   case UnqualifiedId::IK_TemplateId:
     T = ConvertDeclSpecToType(state);
+    ContainsPlaceholderType = D.getDeclSpec().containsPlaceholderType();
 
     if (!D.isInvalidType() && D.getDeclSpec().isTypeSpecOwned()) {
       OwnedTagDecl = cast<TagDecl>(D.getDeclSpec().getRepAsDecl());
@@ -2056,6 +2059,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
     // converts to.
     T = SemaRef.GetTypeFromParser(D.getName().ConversionFunctionId,
                                   &ReturnTypeInfo);
+    ContainsPlaceholderType = T->getContainedAutoType();
     break;
   }
 
@@ -2066,7 +2070,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
   // In C++11, a function declarator using 'auto' must have a trailing return
   // type (this is checked later) and we can skip this. In other languages
   // using auto, we need to check regardless.
-  if (D.getDeclSpec().containsPlaceholderType() &&
+  if (ContainsPlaceholderType &&
       (!SemaRef.getLangOpts().CPlusPlus11 || !D.isFunctionDeclarator())) {
     int Error = -1;
 
@@ -2108,6 +2112,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
     case Declarator::AliasTemplateContext:
       Error = 10; // Type alias
       break;
+    case Declarator::ConversionIdContext:
     case Declarator::TrailingReturnContext:
       if (!SemaRef.getLangOpts().CPlusPlus1y)
         Error = 11; // Function return type
@@ -2149,15 +2154,19 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       }
     }
 
+    SourceRange AutoRange = D.getDeclSpec().getTypeSpecTypeLoc();
+    if (D.getName().getKind() == UnqualifiedId::IK_ConversionFunctionId)
+      AutoRange = D.getName().getSourceRange();
+
     if (Error != -1) {
-      SemaRef.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
-                   diag::err_auto_not_allowed)
-        << Error;
+      SemaRef.Diag(AutoRange.getBegin(), diag::err_auto_not_allowed)
+        << Error << AutoRange;
       T = SemaRef.Context.IntTy;
       D.setInvalidType(true);
     } else
-      SemaRef.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
-                   diag::warn_cxx98_compat_auto_type_specifier);
+      SemaRef.Diag(AutoRange.getBegin(),
+                   diag::warn_cxx98_compat_auto_type_specifier)
+        << AutoRange;
   }
 
   if (SemaRef.getLangOpts().CPlusPlus &&
@@ -2189,6 +2198,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       D.setInvalidType(true);
       break;
     case Declarator::TypeNameContext:
+    case Declarator::ConversionIdContext:
     case Declarator::TemplateParamContext:
     case Declarator::CXXNewContext:
     case Declarator::CXXCatchContext:
@@ -2410,7 +2420,6 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
   // and at most one function declarator if this is a function declaration.
   if (const AutoType *AT = T->getAs<AutoType>()) {
     if (AT->isDecltypeAuto()) {
-      bool SeenFunction = false;
       for (unsigned I = 0, E = D.getNumTypeObjects(); I != E; ++I) {
         DeclaratorChunk &DeclChunk = D.getTypeObject(I);
         switch (DeclChunk.Kind) {
@@ -3078,6 +3087,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     case Declarator::ObjCCatchContext:
     case Declarator::BlockLiteralContext:
     case Declarator::LambdaExprContext:
+    case Declarator::ConversionIdContext:
     case Declarator::TrailingReturnContext:
     case Declarator::TemplateTypeArgContext:
       // FIXME: We may want to allow parameter packs in block-literal contexts
