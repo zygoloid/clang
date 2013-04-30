@@ -3584,8 +3584,12 @@ namespace {
         NewTL.setNameLoc(TL.getNameLoc());
         return Result;
       } else {
-        QualType Result = RebuildAutoType(Replacement,
-                                          TL.getTypePtr()->isDecltypeAuto());
+        bool Dependent =
+          !Replacement.isNull() && Replacement->isDependentType();
+        QualType Result =
+          SemaRef.Context.getAutoType(Dependent ? QualType() : Replacement,
+                                      TL.getTypePtr()->isDecltypeAuto(),
+                                      Dependent);
         AutoTypeLoc NewTL = TLB.push<AutoTypeLoc>(Result);
         NewTL.setNameLoc(TL.getNameLoc());
         return Result;
@@ -3597,43 +3601,28 @@ namespace {
       return E;
     }
   };
-
-  /// Determine whether the specified type (which contains an 'auto' type
-  /// specifier) is dependent. This is not trivial, because the 'auto' specifier
-  /// itself claims to be type-dependent.
-  bool isDependentAutoType(QualType Ty) {
-    while (1) {
-      QualType Pointee = Ty->getPointeeType();
-      if (!Pointee.isNull()) {
-        Ty = Pointee;
-      } else if (const MemberPointerType *MPT = Ty->getAs<MemberPointerType>()){
-        if (MPT->getClass()->isDependentType())
-          return true;
-        Ty = MPT->getPointeeType();
-      } else if (const FunctionProtoType *FPT = Ty->getAs<FunctionProtoType>()){
-        for (FunctionProtoType::arg_type_iterator I = FPT->arg_type_begin(),
-                                                  E = FPT->arg_type_end();
-             I != E; ++I)
-          if ((*I)->isDependentType())
-            return true;
-        Ty = FPT->getResultType();
-      } else if (Ty->isDependentSizedArrayType()) {
-        return true;
-      } else if (const ArrayType *AT = Ty->getAsArrayTypeUnsafe()) {
-        Ty = AT->getElementType();
-      } else if (Ty->getAs<DependentSizedExtVectorType>()) {
-        return true;
-      } else if (const VectorType *VT = Ty->getAs<VectorType>()) {
-        Ty = VT->getElementType();
-      } else {
-        break;
-      }
-    }
-    return false;
-  }
 }
 
-/// \brief Deduce the type for an auto type-specifier (C++0x [dcl.spec.auto]p6)
+static Sema::DeduceAutoResult
+SubstAutoInType(Sema &S, QualType Deduced, QualType Type, QualType &Result,
+                TypeSourceInfo **TSI) {
+  // FIXME: Support a non-canonical deduced type for 'auto'.
+  Deduced = S.Context.getCanonicalType(Deduced);
+
+  if (TSI) {
+    *TSI = SubstituteAutoTransform(S, Deduced).TransformType(*TSI);
+    if (!*TSI)
+      return Sema::DAR_FailedAlreadyDiagnosed;
+    Result = (*TSI)->getType();
+  } else {
+    Result = SubstituteAutoTransform(S, Deduced).TransformType(Type);
+  }
+
+  return Result.isNull() ? Sema::DAR_FailedAlreadyDiagnosed
+                         : Sema::DAR_Succeeded;
+}
+
+/// \brief Deduce the type for an auto type-specifier (C++11 [dcl.spec.auto]p6)
 ///
 /// \param Type the type pattern using the auto type-specifier.
 ///
@@ -3653,9 +3642,9 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
     Init = result.take();
   }
 
-  if (Init->isTypeDependent() || isDependentAutoType(Type)) {
+  if (Init->isTypeDependent() || Type->isDependentType()) {
     Result = Type;
-    return DAR_Succeeded;
+    return SubstAutoInType(*this, Context.DependentTy, Type, Result, TSI);
   }
 
   // If this is a 'decltype(auto)' specifier, do the decltype dance.
@@ -3669,19 +3658,7 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
       }
 
       QualType Deduced = BuildDecltypeType(Init, Init->getLocStart());
-      // FIXME: Support a non-canonical deduced type for 'auto'.
-      Deduced = Context.getCanonicalType(Deduced);
-      // Perform substitution rather than just wrapping this in an AutoType,
-      // just in case the decltype(auto) was in parens or something.
-      if (TSI) {
-        *TSI = SubstituteAutoTransform(*this, Deduced).TransformType(*TSI);
-        if (!*TSI)
-          return DAR_FailedAlreadyDiagnosed;
-        Result = (*TSI)->getType();
-      } else {
-        Result = SubstituteAutoTransform(*this, Deduced).TransformType(Type);
-      }
-      return Result.isNull() ? DAR_FailedAlreadyDiagnosed : DAR_Succeeded;
+      return SubstAutoInType(*this, Deduced, Type, Result, TSI);
     }
   }
 
@@ -3742,27 +3719,18 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
       return DAR_FailedAlreadyDiagnosed;
   }
 
-  if (TSI) {
-    *TSI = SubstituteAutoTransform(*this, DeducedType).TransformType(*TSI);
-    if (!*TSI)
-      return DAR_FailedAlreadyDiagnosed;
-    Result = (*TSI)->getType();
-  } else {
-    Result = SubstituteAutoTransform(*this, DeducedType).TransformType(Type);
-  }
-
-  if (Result.isNull())
-    return DAR_FailedAlreadyDiagnosed;
+  Sema::DeduceAutoResult DAR = SubstAutoInType(*this, DeducedType, Type,
+                                               Result, TSI);
 
   // Check that the deduced argument type is compatible with the original
   // argument type per C++ [temp.deduct.call]p4.
-  if (!InitList &&
+  if (!InitList && DAR == DAR_Succeeded &&
       CheckOriginalCallArgDeduction(*this,
                                     Sema::OriginalCallArg(FuncParam,0,InitType),
                                     Result))
     return DAR_Failed;
 
-  return DAR_Succeeded;
+  return DAR;
 }
 
 Sema::DeduceAutoResult

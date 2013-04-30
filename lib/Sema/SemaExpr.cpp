@@ -55,6 +55,8 @@ bool Sema::CanUseDecl(NamedDecl *D) {
   if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
     if (FD->isDeleted())
       return false;
+
+    // FIXME: Handle 'auto' return types here too.
   }
 
   // See if this function is unavailable.
@@ -280,21 +282,17 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, SourceLocation Loc,
     }
 
     if (getLangOpts().CPlusPlus1y) {
-      AutoType *AT = FD->getResultType()->getContainedAutoType();
-
       // Instantiate a function template whenever it is referenced if it
       // has a deduced return type.
-      if (AT && !AT->isDeduced()) {
-        if (FD->getTemplateInstantiationPattern()) {
+      if (FD->getResultType()->isUndeducedType()) {
+        if (FD->getTemplateInstantiationPattern())
           InstantiateFunctionDefinition(Loc, FD);
-          AT = FD->getResultType()->getContainedAutoType();
-        }
-      }
 
-      if (AT && !AT->isDeduced()) {
-        Diag(Loc, diag::err_auto_fn_used_before_defined) << D;
-        Diag(D->getLocation(), diag::note_callee_decl) << D;
-        return true;
+        if (FD->getResultType()->isUndeducedType()) {
+          Diag(Loc, diag::err_auto_fn_used_before_defined) << D;
+          Diag(D->getLocation(), diag::note_callee_decl) << D;
+          return true;
+        }
       }
     }
   }

@@ -3825,7 +3825,7 @@ static bool handleObjCOwnershipTypeAttr(TypeProcessingState &state,
                                        QualType &type) {
   bool NonObjCPointer = false;
 
-  if (!type->isDependentType()) {
+  if (!type->isDependentType() && !type->isUndeducedType()) {
     if (const PointerType *ptr = type->getAs<PointerType>()) {
       QualType pointee = ptr->getPointeeType();
       if (pointee->isObjCRetainableType() || pointee->isPointerType())

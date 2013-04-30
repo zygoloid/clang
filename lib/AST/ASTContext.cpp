@@ -1550,7 +1550,8 @@ ASTContext::getTypeInfoImpl(const Type *T) const {
 
   case Type::Auto: {
     const AutoType *A = cast<AutoType>(T);
-    assert(A->isDeduced() && "Cannot request the size of a dependent type");
+    assert(!A->getDeducedType().isNull() &&
+           "cannot request the size of an undeduced or dependent auto type");
     return getTypeInfo(A->getDeducedType().getTypePtr());
   }
 
@@ -3526,21 +3527,23 @@ QualType ASTContext::getUnaryTransformType(QualType BaseType,
 }
 
 /// getAutoType - Return the uniqued reference to the 'auto' type which has been
-/// deduced to the given type, or to the canonical undeduced 'auto' type.
-QualType ASTContext::getAutoType(QualType DeducedType,
-                                 bool IsDecltypeAuto) const {
-  if (DeducedType.isNull() && !IsDecltypeAuto)
+/// deduced to the given type, or to the canonical undeduced 'auto' type, or the
+/// canonical deduced-but-dependent 'auto' type.
+QualType ASTContext::getAutoType(QualType DeducedType, bool IsDecltypeAuto,
+                                 bool IsDependent) const {
+  if (DeducedType.isNull() && !IsDecltypeAuto && !IsDependent)
     return getAutoDeductType();
 
   // Look in the folding set for an existing type.
   void *InsertPos = 0;
   llvm::FoldingSetNodeID ID;
-  AutoType::Profile(ID, DeducedType, IsDecltypeAuto);
+  AutoType::Profile(ID, DeducedType, IsDecltypeAuto, IsDependent);
   if (AutoType *AT = AutoTypes.FindNodeOrInsertPos(ID, InsertPos))
     return QualType(AT, 0);
 
   AutoType *AT = new (*this, TypeAlignment) AutoType(DeducedType,
-                                                     IsDecltypeAuto);
+                                                     IsDecltypeAuto,
+                                                     IsDependent);
   Types.push_back(AT);
   if (InsertPos)
     AutoTypes.InsertNode(AT, InsertPos);
@@ -3579,7 +3582,8 @@ QualType ASTContext::getAtomicType(QualType T) const {
 QualType ASTContext::getAutoDeductType() const {
   if (AutoDeductTy.isNull())
     AutoDeductTy = QualType(
-      new (*this, TypeAlignment) AutoType(QualType(), /*decltype(auto)*/false),
+      new (*this, TypeAlignment) AutoType(QualType(), /*decltype(auto)*/false,
+                                          /*dependent*/false),
       0);
   return AutoDeductTy;
 }
@@ -5353,6 +5357,11 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string& S,
     // FIXME. We should do a better job than gcc.
     return;
 
+  case Type::Auto:
+    // We could see an undeduced auto type here during error recovery.
+    // Just ignore it.
+    return;
+
 #define ABSTRACT_TYPE(KIND, BASE)
 #define TYPE(KIND, BASE)
 #define DEPENDENT_TYPE(KIND, BASE) \
@@ -6994,6 +7003,7 @@ QualType ASTContext::mergeTypes(QualType LHS, QualType RHS,
 #include "clang/AST/TypeNodes.def"
     llvm_unreachable("Non-canonical and dependent types shouldn't get here");
 
+  case Type::Auto:
   case Type::LValueReference:
   case Type::RValueReference:
   case Type::MemberPointer:

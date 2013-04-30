@@ -2812,8 +2812,7 @@ void Sema::MergeVarDeclTypes(VarDecl *New, VarDecl *Old, bool OldWasHidden) {
 
   QualType MergedT;
   if (getLangOpts().CPlusPlus) {
-    AutoType *AT = New->getType()->getContainedAutoType();
-    if (AT && !AT->isDeduced()) {
+    if (New->getType()->isUndeducedType()) {
       // We don't know what the new type is until the initializer is attached.
       return;
     } else if (Context.hasSameType(New->getType(), Old->getType())) {
@@ -5153,26 +5152,17 @@ static bool mayConflictWithNonVisibleExternC(const T *ND) {
   return ND->isExternC();
 }
 
-/// \brief Perform semantic checking on a newly-created variable
-/// declaration.
-///
-/// This routine performs all of the type-checking required for a
-/// variable declaration once it has been built. It is used both to
-/// check variables after they have been parsed and their declarators
-/// have been translated into a declaration, and to check variables
-/// that have been instantiated from a template.
-///
-/// Sets NewVD->isInvalidDecl() if an error was encountered.
-///
-/// Returns true if the variable declaration is a redeclaration.
-bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
-                                    LookupResult &Previous) {
+void Sema::CheckVariableDeclarationType(VarDecl *NewVD) {
   // If the decl is already known invalid, don't check it.
   if (NewVD->isInvalidDecl())
-    return false;
+    return;
 
   TypeSourceInfo *TInfo = NewVD->getTypeSourceInfo();
   QualType T = TInfo->getType();
+
+  // Defer checking an 'auto' type until its initializer is attached.
+  if (T->isUndeducedType())
+    return;
 
   if (T->isObjCObjectType()) {
     Diag(NewVD->getLocation(), diag::err_statically_allocated_object)
@@ -5188,7 +5178,7 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
   if (NewVD->hasLocalStorage() && T.getAddressSpace() != 0) {
     Diag(NewVD->getLocation(), diag::err_as_qualified_auto_decl);
     NewVD->setInvalidDecl();
-    return false;
+    return;
   }
 
   // OpenCL v1.2 s6.5 - All program scope variables must be declared in the
@@ -5198,7 +5188,7 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
       && !T->isSamplerT()){
     Diag(NewVD->getLocation(), diag::err_opencl_global_invalid_addr_space);
     NewVD->setInvalidDecl();
-    return false;
+    return;
   }
   
   // OpenCL v1.2 s6.8 -- The static qualifier is valid only in program
@@ -5207,7 +5197,7 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
       && NewVD->isStaticLocal()) {
     Diag(NewVD->getLocation(), diag::err_static_function_scope);
     NewVD->setInvalidDecl();
-    return false;
+    return;
   }
 
   if (NewVD->hasLocalStorage() && T.isObjCGCWeak()
@@ -5248,7 +5238,7 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
         Diag(NewVD->getLocation(), diag::err_vla_decl_has_extern_linkage)
         << SizeRange;
       NewVD->setInvalidDecl();
-      return false;
+      return;
     }
 
     if (FixedTInfo == 0) {
@@ -5257,13 +5247,61 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
       else
         Diag(NewVD->getLocation(), diag::err_vm_decl_has_extern_linkage);
       NewVD->setInvalidDecl();
-      return false;
+      return;
     }
 
     Diag(NewVD->getLocation(), diag::warn_illegal_constant_array_size);
     NewVD->setType(FixedTInfo->getType());
     NewVD->setTypeSourceInfo(FixedTInfo);
   }
+
+  if (T->isVoidType() && !NewVD->hasExternalStorage()) {
+    Diag(NewVD->getLocation(), diag::err_typecheck_decl_incomplete_type)
+      << T;
+    NewVD->setInvalidDecl();
+    return;
+  }
+
+  if (!NewVD->hasLocalStorage() && NewVD->hasAttr<BlocksAttr>()) {
+    Diag(NewVD->getLocation(), diag::err_block_on_nonlocal);
+    NewVD->setInvalidDecl();
+    return;
+  }
+
+  if (isVM && NewVD->hasAttr<BlocksAttr>()) {
+    Diag(NewVD->getLocation(), diag::err_block_on_vm);
+    NewVD->setInvalidDecl();
+    return;
+  }
+
+  if (NewVD->isConstexpr() && !T->isDependentType() &&
+      RequireLiteralType(NewVD->getLocation(), T,
+                         diag::err_constexpr_var_non_literal)) {
+    // Can't perform this check until the type is deduced.
+    NewVD->setInvalidDecl();
+    return;
+  }
+}
+
+/// \brief Perform semantic checking on a newly-created variable
+/// declaration.
+///
+/// This routine performs all of the type-checking required for a
+/// variable declaration once it has been built. It is used both to
+/// check variables after they have been parsed and their declarators
+/// have been translated into a declaration, and to check variables
+/// that have been instantiated from a template.
+///
+/// Sets NewVD->isInvalidDecl() if an error was encountered.
+///
+/// Returns true if the variable declaration is a redeclaration.
+bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
+                                    LookupResult &Previous) {
+  CheckVariableDeclarationType(NewVD);
+
+  // If the decl is already known invalid, don't check it.
+  if (NewVD->isInvalidDecl())
+    return false;
 
   // If we did not find anything by this name, look for a non-visible
   // extern "C" declaration with the same name.
@@ -5302,32 +5340,6 @@ bool Sema::CheckVariableDeclaration(VarDecl *NewVD,
 
   // Filter out any non-conflicting previous declarations.
   filterNonConflictingPreviousDecls(Context, NewVD, Previous);
-
-  if (T->isVoidType() && !NewVD->hasExternalStorage()) {
-    Diag(NewVD->getLocation(), diag::err_typecheck_decl_incomplete_type)
-      << T;
-    NewVD->setInvalidDecl();
-    return false;
-  }
-
-  if (!NewVD->hasLocalStorage() && NewVD->hasAttr<BlocksAttr>()) {
-    Diag(NewVD->getLocation(), diag::err_block_on_nonlocal);
-    NewVD->setInvalidDecl();
-    return false;
-  }
-
-  if (isVM && NewVD->hasAttr<BlocksAttr>()) {
-    Diag(NewVD->getLocation(), diag::err_block_on_vm);
-    NewVD->setInvalidDecl();
-    return false;
-  }
-
-  if (NewVD->isConstexpr() && !T->isDependentType() &&
-      RequireLiteralType(NewVD->getLocation(), T,
-                         diag::err_constexpr_var_non_literal)) {
-    NewVD->setInvalidDecl();
-    return false;
-  }
 
   if (!Previous.empty()) {
     MergeVarDecl(NewVD, Previous, PreviousWasHidden);
@@ -7292,10 +7304,7 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
   ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
 
   // C++11 [decl.spec.auto]p6. Deduce the type which 'auto' stands in for.
-  AutoType *Auto = 0;
-  if (TypeMayContainAuto &&
-      (Auto = VDecl->getType()->getContainedAutoType()) &&
-      !Auto->isDeduced()) {
+  if (TypeMayContainAuto && VDecl->getType()->isUndeducedType()) {
     Expr *DeduceInit = Init;
     // Initializer could be a C++ direct-initializer. Deduction only works if it
     // contains exactly one expression.
@@ -7365,6 +7374,11 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init,
     // the previously declared type.
     if (VarDecl *Old = VDecl->getPreviousDecl())
       MergeVarDeclTypes(VDecl, Old, /*OldWasHidden*/ false);
+
+    // Check the deduced type is valid for a variable declaration.
+    CheckVariableDeclarationType(VDecl);
+    if (VDecl->isInvalidDecl())
+      return;
   }
 
   if (VDecl->isLocalVarDecl() && VDecl->hasExternalStorage()) {
@@ -8198,8 +8212,8 @@ Sema::BuildDeclaratorGroup(Decl **Group, unsigned NumDecls,
         // Don't reissue diagnostics when instantiating a template.
         if (AT && D->isInvalidDecl())
           break;
-        if (AT && AT->isDeduced()) {
-          QualType U = AT->getDeducedType();
+        QualType U = AT ? AT->getDeducedType() : QualType();
+        if (!U.isNull()) {
           CanQualType UCanon = Context.getCanonicalType(U);
           if (Deduced.isNull()) {
             Deduced = U;
@@ -8857,8 +8871,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
 
     if (getLangOpts().CPlusPlus1y && !FD->isInvalidDecl() &&
         !FD->isDependentContext()) {
-      AutoType *AT = FD->getResultType()->getContainedAutoType();
-      if (AT && !AT->isDeduced()) {
+      if (FD->getResultType()->isUndeducedType()) {
         // If the function has a deduced result type but contains no 'return'
         // statements, the result type as written must be exactly 'auto', and
         // the deduced result type is 'void'.
