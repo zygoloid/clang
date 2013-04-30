@@ -3600,32 +3600,33 @@ namespace {
       // Lambdas never need to be transformed.
       return E;
     }
+
+    QualType Apply(TypeSourceInfo *TSI) {
+      if (TypeSourceInfo *Result = TransformType(TSI))
+        return Result->getType();
+      return QualType();
+    }
   };
 }
 
 /// \brief Deduce the type for an auto type-specifier (C++11 [dcl.spec.auto]p6)
 ///
 /// \param Type the type pattern using the auto type-specifier.
-///
 /// \param Init the initializer for the variable whose type is to be deduced.
-///
 /// \param Result if type deduction was successful, this will be set to the
-/// deduced type. This may still contain undeduced autos if the type is
-/// dependent. This will be set to null if deduction succeeded, but auto
-/// substitution failed; the appropriate diagnostic will already have been
-/// produced in that case.
+///        deduced type.
 Sema::DeduceAutoResult
 Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
                      TypeSourceInfo **TSI) {
   if (Init->getType()->isNonOverloadPlaceholderType()) {
-    ExprResult result = CheckPlaceholderExpr(Init);
-    if (result.isInvalid()) return DAR_FailedAlreadyDiagnosed;
-    Init = result.take();
+    ExprResult NonPlaceholder = CheckPlaceholderExpr(Init);
+    if (NonPlaceholder.isInvalid())
+      return DAR_FailedAlreadyDiagnosed;
+    Init = NonPlaceholder.take();
   }
 
   if (Init->isTypeDependent() || Type->getType()->isDependentType()) {
-    Result =
-        SubstituteAutoTransform(*this, Context.DependentTy).TransformType(Type);
+    Result = SubstituteAutoTransform(*this, Context.DependentTy).Apply(Type);
     return DAR_Succeeded;
   }
 
@@ -3642,7 +3643,7 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
       QualType Deduced = BuildDecltypeType(Init, Init->getLocStart());
       // FIXME: Support a non-canonical deduced type for 'auto'.
       Deduced = Context.getCanonicalType(Deduced);
-      Result = SubstituteAutoTransform(*this, Deduced).TransformType(Type);
+      Result = SubstituteAutoTransform(*this, Deduced).Apply(Type);
       return DAR_Succeeded;
     }
   }
@@ -3660,8 +3661,7 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
   FixedSizeTemplateParameterList<1> TemplateParams(Loc, Loc, &TemplParamPtr,
                                                    Loc);
 
-  QualType FuncParam =
-    SubstituteAutoTransform(*this, TemplArg).TransformType(Type);
+  QualType FuncParam = SubstituteAutoTransform(*this, TemplArg).Apply(Type);
   assert(!FuncParam.isNull() &&
          "substituting template parameter for 'auto' failed");
 
@@ -3704,33 +3704,18 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
       return DAR_FailedAlreadyDiagnosed;
   }
 
-  Sema::DeduceAutoResult DAR = SubstAutoInType(*this, DeducedType, Type,
-                                               Result, TSI);
+  Result = SubstituteAutoTransform(*this, DeducedType).Apply(Type);
 
   // Check that the deduced argument type is compatible with the original
   // argument type per C++ [temp.deduct.call]p4.
-  if (!InitList && DAR == DAR_Succeeded &&
+  if (!InitList && !Result.isNull() &&
       CheckOriginalCallArgDeduction(*this,
                                     Sema::OriginalCallArg(FuncParam,0,InitType),
-                                    Result))
+                                    Result)) {
+    Result = QualType();
     return DAR_Failed;
 
   return DAR;
-}
-
-Sema::DeduceAutoResult
-Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
-                     TypeSourceInfo *&Result) {
-  QualType DeducedType;
-  DeduceAutoResult DAR = DeduceAutoType(Type->getType(), Init,
-                                        DeducedType, &Type);
-  if (DAR == DAR_Succeeded)
-    Result = Type;
-  return DAR;
-}
-
-QualType Sema::SubstAutoType(QualType Type, QualType Deduced) {
-  return SubstituteAutoTransform(*this, Deduced).TransformType(Type);
 }
 
 QualType Sema::SubstAutoType(QualType Type, QualType Deduced) {
