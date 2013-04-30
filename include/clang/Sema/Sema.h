@@ -5643,9 +5643,7 @@ public:
   };
 
   DeduceAutoResult DeduceAutoType(TypeSourceInfo *AutoType, Expr *&Initializer,
-                                  TypeSourceInfo *&Result);
-  DeduceAutoResult DeduceAutoType(QualType AutoType, Expr *&Initializer,
-                                  QualType &Result, TypeSourceInfo **TSI = 0);
+                                  QualType &Result);
   QualType SubstAutoType(QualType TypeWithAuto, QualType Replacement);
   void DiagnoseAutoDeductionFailure(VarDecl *VDecl, Expr *Init);
 

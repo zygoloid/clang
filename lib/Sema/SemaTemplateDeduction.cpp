@@ -3603,25 +3603,6 @@ namespace {
   };
 }
 
-static Sema::DeduceAutoResult
-SubstAutoInType(Sema &S, QualType Deduced, QualType Type, QualType &Result,
-                TypeSourceInfo **TSI) {
-  // FIXME: Support a non-canonical deduced type for 'auto'.
-  Deduced = S.Context.getCanonicalType(Deduced);
-
-  if (TSI) {
-    *TSI = SubstituteAutoTransform(S, Deduced).TransformType(*TSI);
-    if (!*TSI)
-      return Sema::DAR_FailedAlreadyDiagnosed;
-    Result = (*TSI)->getType();
-  } else {
-    Result = SubstituteAutoTransform(S, Deduced).TransformType(Type);
-  }
-
-  return Result.isNull() ? Sema::DAR_FailedAlreadyDiagnosed
-                         : Sema::DAR_Succeeded;
-}
-
 /// \brief Deduce the type for an auto type-specifier (C++11 [dcl.spec.auto]p6)
 ///
 /// \param Type the type pattern using the auto type-specifier.
@@ -3642,24 +3623,10 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
     Init = result.take();
   }
 
-  if (Init->isTypeDependent() || Type->isDependentType()) {
-    Result = Type;
-    return SubstAutoInType(*this, Context.DependentTy, Type, Result, TSI);
-  }
-
-  // If this is a 'decltype(auto)' specifier, do the decltype dance.
-  // Since 'decltype(auto)' can only occur at the top of the type, we
-  // don't need to go digging for it.
-  if (const AutoType *AT = Type->getAs<AutoType>()) {
-    if (AT->isDecltypeAuto()) {
-      if (isa<InitListExpr>(Init)) {
-        Diag(Init->getLocStart(), diag::err_decltype_auto_initializer_list);
-        return DAR_FailedAlreadyDiagnosed;
-      }
-
-      QualType Deduced = BuildDecltypeType(Init, Init->getLocStart());
-      return SubstAutoInType(*this, Deduced, Type, Result, TSI);
-    }
+  if (Init->isTypeDependent() || Type->getType()->isDependentType()) {
+    Result =
+        SubstituteAutoTransform(*this, Context.DependentTy).TransformType(Type);
+    return DAR_Succeeded;
   }
 
   // If this is a 'decltype(auto)' specifier, do the decltype dance.
@@ -3760,6 +3727,10 @@ Sema::DeduceAutoType(TypeSourceInfo *Type, Expr *&Init,
   if (DAR == DAR_Succeeded)
     Result = Type;
   return DAR;
+}
+
+QualType Sema::SubstAutoType(QualType Type, QualType Deduced) {
+  return SubstituteAutoTransform(*this, Deduced).TransformType(Type);
 }
 
 QualType Sema::SubstAutoType(QualType Type, QualType Deduced) {
