@@ -40,15 +40,23 @@ decltype(auto) x6d = { 1, 2 }; // expected-error {{cannot deduce 'decltype(auto)
 using InitListInt = decltype(x6a);
 
 auto *x7a = &i;
-decltype(auto) *x7d = &i; // expected-error {{'decltype(auto)' cannot be used to form a compound type}}
+decltype(auto) *x7d = &i; // expected-error {{cannot form pointer to 'decltype(auto)'}}
 using IntPtr = decltype(x7a);
 
-decltype(auto) f1();
-decltype(auto) (*f2)(); // expected-error {{'decltype(auto)' cannot be used to form a compound type}} expected-error {{requires an initializer}}
-decltype(auto) *f3(); // expected-error {{'decltype(auto)' cannot be used to form a compound type}}
-const decltype(auto) f4(); // expected-error {{'decltype(auto)' cannot be combined with other type specifiers}}
-typedef decltype(auto) f5(); // expected-error {{'decltype(auto)' cannot be used to form a compound type}}
-decltype(auto) ((((((f6))))())); // ok
-decltype(auto) f7()(); // expected-error {{function cannot return function type}}
+struct S {};
 
-decltype(auto) ((((((v)))))) = 0; // ok
+decltype(auto) f1();
+decltype(auto) (*f2)(); // expected-error {{'decltype(auto)' can only be used as a return type in a function declaration}} expected-error {{requires an initializer}}
+decltype(auto) *f3(); // expected-error {{cannot form pointer to 'decltype(auto)'}}
+const decltype(auto) f4(); // expected-error {{'decltype(auto)' cannot be combined with other type specifiers}}
+typedef decltype(auto) f5(); // expected-error {{'decltype(auto)' can only be used as a return type in a function declaration}}
+decltype(auto) ((((((f6))))())); // ok
+decltype(auto) f7()(); // expected-error {{'decltype(auto)' can only be used as a return type in a function declaration}} expected-error {{function cannot return function type}}
+decltype(auto) (S::*f8)(); // expected-error {{'decltype(auto)' can only be used as a return type in a function declaration}} expected-error {{requires an initializer}}
+decltype(auto) &f9(); // expected-error {{cannot form reference to 'decltype(auto)'}}
+decltype(auto) (&f10())[10]; // expected-error {{cannot form array of 'decltype(auto)'}}
+
+decltype(auto) ((((((v1)))))) = 0; // ok
+decltype(auto) v2[1] = { 0 }; // expected-error {{cannot form array of 'decltype(auto)'}}
+decltype(auto) &v3 = { 0 }; // expected-error {{cannot form reference to 'decltype(auto)'}}
+decltype(auto) *v4 = { 0 }; // expected-error {{cannot form pointer to 'decltype(auto)'}}

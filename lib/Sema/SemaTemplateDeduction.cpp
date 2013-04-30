@@ -3662,6 +3662,24 @@ Sema::DeduceAutoType(QualType Type, Expr *&Init, QualType &Result,
     }
   }
 
+  // If this is a 'decltype(auto)' specifier, do the decltype dance.
+  // Since 'decltype(auto)' can only occur at the top of the type, we
+  // don't need to go digging for it.
+  if (const AutoType *AT = Type->getType()->getAs<AutoType>()) {
+    if (AT->isDecltypeAuto()) {
+      if (isa<InitListExpr>(Init)) {
+        Diag(Init->getLocStart(), diag::err_decltype_auto_initializer_list);
+        return DAR_FailedAlreadyDiagnosed;
+      }
+
+      QualType Deduced = BuildDecltypeType(Init, Init->getLocStart());
+      // FIXME: Support a non-canonical deduced type for 'auto'.
+      Deduced = Context.getCanonicalType(Deduced);
+      Result = SubstituteAutoTransform(*this, Deduced).TransformType(Type);
+      return DAR_Succeeded;
+    }
+  }
+
   SourceLocation Loc = Init->getExprLoc();
 
   LocalInstantiationScope InstScope(*this);

@@ -1933,15 +1933,17 @@ ExprResult Sema::ActOnIdExpression(Scope *S,
     // If this name wasn't predeclared and if this is not a function
     // call, diagnose the problem.
     if (R.empty()) {
-
       // In Microsoft mode, if we are inside a template class member function
-      // and we can't resolve an identifier then assume the identifier is type
-      // dependent. The goal is to postpone name lookup to instantiation time 
-      // to be able to search into type dependent base classes.
-      if (getLangOpts().MicrosoftMode && CurContext->isDependentContext() &&
-          isa<CXXMethodDecl>(CurContext))
-        return ActOnDependentIdExpression(SS, TemplateKWLoc, NameInfo,
-                                          IsAddressOfOperand, TemplateArgs);
+      // whose parent class has dependent base classes, and we can't resolve
+      // an identifier, then assume the identifier is type dependent.  The
+      // goal is to postpone name lookup to instantiation time to be able to
+      // search into the type dependent base classes.
+      if (getLangOpts().MicrosoftMode) {
+        CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(CurContext);
+        if (MD && MD->getParent()->hasAnyDependentBases())
+          return ActOnDependentIdExpression(SS, TemplateKWLoc, NameInfo,
+                                            IsAddressOfOperand, TemplateArgs);
+      }
 
       CorrectionCandidateCallback DefaultValidator;
       if (DiagnoseEmptyLookup(S, SS, R, CCC ? *CCC : DefaultValidator))
@@ -8576,6 +8578,36 @@ static void DiagnoseSelfAssignment(Sema &S, Expr *LHSExpr, Expr *RHSExpr,
       << LHSExpr->getSourceRange() << RHSExpr->getSourceRange();
 }
 
+/// Check if a bitwise-& is performed on an Objective-C pointer.  This
+/// is usually indicative of introspection within the Objective-C pointer.
+static void checkObjCPointerIntrospection(Sema &S, ExprResult &L, ExprResult &R,
+                                          SourceLocation OpLoc) {
+  if (!S.getLangOpts().ObjC1)
+    return;
+
+  const Expr *ObjCPointerExpr = 0, *OtherExpr = 0;
+  const Expr *LHS = L.get();
+  const Expr *RHS = R.get();
+
+  if (LHS->IgnoreParenCasts()->getType()->isObjCObjectPointerType()) {
+    ObjCPointerExpr = LHS;
+    OtherExpr = RHS;
+  }
+  else if (RHS->IgnoreParenCasts()->getType()->isObjCObjectPointerType()) {
+    ObjCPointerExpr = RHS;
+    OtherExpr = LHS;
+  }
+
+  // This warning is deliberately made very specific to reduce false
+  // positives with logic that uses '&' for hashing.  This logic mainly
+  // looks for code trying to introspect into tagged pointers, which
+  // code should generally never do.
+  if (ObjCPointerExpr && isa<IntegerLiteral>(OtherExpr->IgnoreParenCasts())) {
+    S.Diag(OpLoc, diag::warn_objc_pointer_masking)
+      << ObjCPointerExpr->getSourceRange();
+  }
+}
+
 /// CreateBuiltinBinOp - Creates a new built-in binary operation with
 /// operator @p Opc at location @c TokLoc. This routine only supports
 /// built-in operations; ActOnBinOp handles overloaded operators.
@@ -8653,6 +8685,7 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
     ResultTy = CheckCompareOperands(LHS, RHS, OpLoc, Opc, false);
     break;
   case BO_And:
+    checkObjCPointerIntrospection(*this, LHS, RHS, OpLoc);
   case BO_Xor:
   case BO_Or:
     ResultTy = CheckBitwiseOperands(LHS, RHS, OpLoc);
@@ -10153,6 +10186,10 @@ bool Sema::DiagnoseAssignmentResult(AssignConvertType ConvTy,
       SrcType->isObjCObjectPointerType();
     if (Hint.isNull() && !CheckInferredResultType) {
       ConvHints.tryToFixConversion(SrcExpr, SrcType, DstType, *this);
+    }
+    else if (CheckInferredResultType) {
+      SrcType = SrcType.getUnqualifiedType();
+      DstType = DstType.getUnqualifiedType();
     }
     MayHaveConvFixit = true;
     break;

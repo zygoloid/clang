@@ -1460,12 +1460,6 @@ QualType Sema::BuildArrayType(QualType T, ArrayType::ArraySizeModifier ASM,
     return QualType();
   }
 
-  if (T->getContainedAutoType()) {
-    Diag(Loc, diag::err_illegal_decl_array_of_auto)
-      << getPrintableNameForEntity(Entity) << T;
-    return QualType();
-  }
-
   if (const RecordType *EltTy = T->getAs<RecordType>()) {
     // If the element type is a struct or union that contains a variadic
     // array, accept it as a GNU extension: C99 6.7.2.1p2.
@@ -2421,21 +2415,37 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
   if (const AutoType *AT = T->getAs<AutoType>()) {
     if (AT->isDecltypeAuto()) {
       for (unsigned I = 0, E = D.getNumTypeObjects(); I != E; ++I) {
-        DeclaratorChunk &DeclChunk = D.getTypeObject(I);
+        unsigned Index = E - I - 1;
+        DeclaratorChunk &DeclChunk = D.getTypeObject(Index);
+        unsigned DiagId = diag::err_decltype_auto_compound_type;
+        unsigned DiagKind = 0;
         switch (DeclChunk.Kind) {
         case DeclaratorChunk::Paren:
           continue;
-        case DeclaratorChunk::Function:
-          // Multiple function declarators with no other chunks is an error
-          // anyway (functions can't return functions) so no need to diagnose.
-          if (D.isFunctionDeclarationContext())
+        case DeclaratorChunk::Function: {
+          unsigned FnIndex;
+          if (D.isFunctionDeclarationContext() &&
+              D.isFunctionDeclarator(FnIndex) && FnIndex == Index)
             continue;
-          // Fall through.
-        default:
-          S.Diag(DeclChunk.Loc, diag::err_decltype_auto_compound_type);
-          D.setInvalidType(true);
+          DiagId = diag::err_decltype_auto_function_declarator_not_declaration;
           break;
         }
+        case DeclaratorChunk::Pointer:
+        case DeclaratorChunk::BlockPointer:
+        case DeclaratorChunk::MemberPointer:
+          DiagKind = 0;
+          break;
+        case DeclaratorChunk::Reference:
+          DiagKind = 1;
+          break;
+        case DeclaratorChunk::Array:
+          DiagKind = 2;
+          break;
+        }
+
+        S.Diag(DeclChunk.Loc, DiagId) << DiagKind;
+        D.setInvalidType(true);
+        break;
       }
     }
   }
@@ -2565,6 +2575,15 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
             // These are invalid anyway, so just ignore.
             break;
           }
+        }
+      }
+
+      if (const AutoType *AT = T->getContainedAutoType()) {
+        // We've already diagnosed this for decltype(auto).
+        if (!AT->isDecltypeAuto()) {
+          S.Diag(DeclType.Loc, diag::err_illegal_decl_array_of_auto)
+            << getPrintableNameForEntity(Name) << T;
+          D.setInvalidType(true);
         }
       }
 
@@ -4850,7 +4869,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
   QualType ElemType = Context.getBaseElementType(T);
   RequireCompleteType(Loc, ElemType, 0);
 
-  if (T->isLiteralType())
+  if (T->isLiteralType(Context))
     return false;
 
   if (Diagnoser.Suppressed)
@@ -4892,7 +4911,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
   } else if (RD->hasNonLiteralTypeFieldsOrBases()) {
     for (CXXRecordDecl::base_class_const_iterator I = RD->bases_begin(),
          E = RD->bases_end(); I != E; ++I) {
-      if (!I->getType()->isLiteralType()) {
+      if (!I->getType()->isLiteralType(Context)) {
         Diag(I->getLocStart(),
              diag::note_non_literal_base_class)
           << RD << I->getType() << I->getSourceRange();
@@ -4901,7 +4920,7 @@ bool Sema::RequireLiteralType(SourceLocation Loc, QualType T,
     }
     for (CXXRecordDecl::field_iterator I = RD->field_begin(),
          E = RD->field_end(); I != E; ++I) {
-      if (!I->getType()->isLiteralType() ||
+      if (!I->getType()->isLiteralType(Context) ||
           I->getType().isVolatileQualified()) {
         Diag(I->getLocation(), diag::note_non_literal_field)
           << RD << *I << I->getType()

@@ -57,7 +57,7 @@ llvm::MDNode *CodeGenTBAA::getRoot() {
 llvm::MDNode *CodeGenTBAA::createTBAAScalarType(StringRef Name,
                                                 llvm::MDNode *Parent) {
   if (CodeGenOpts.StructPathTBAA)
-    return MDHelper.createTBAAScalarTypeNode(Name, 0, Parent);
+    return MDHelper.createTBAAScalarTypeNode(Name, Parent);
   else
     return MDHelper.createTBAANode(Name, Parent);
 }
@@ -204,8 +204,18 @@ CodeGenTBAA::CollectFields(uint64_t BaseOffset,
     const ASTRecordLayout &Layout = Context.getASTRecordLayout(RD);
 
     unsigned idx = 0;
+    const FieldDecl *LastFD = 0;
+    bool IsMsStruct = RD->isMsStruct(Context);
     for (RecordDecl::field_iterator i = RD->field_begin(),
          e = RD->field_end(); i != e; ++i, ++idx) {
+      if (IsMsStruct) {
+        // Zero-length bitfields following non-bitfield members are ignored.
+        if (Context.ZeroBitfieldFollowsNonBitfield(*i, LastFD)) {
+          --idx;
+          continue;
+        }
+        LastFD = *i;
+      }
       uint64_t Offset = BaseOffset +
                         Layout.getFieldOffset(idx) / Context.getCharWidth();
       QualType FieldQTy = i->getType();
@@ -220,7 +230,9 @@ CodeGenTBAA::CollectFields(uint64_t BaseOffset,
   uint64_t Offset = BaseOffset;
   uint64_t Size = Context.getTypeSizeInChars(QTy).getQuantity();
   llvm::MDNode *TBAAInfo = MayAlias ? getChar() : getTBAAInfo(QTy);
-  Fields.push_back(llvm::MDBuilder::TBAAStructField(Offset, Size, TBAAInfo));
+  llvm::MDNode *TBAATag = CodeGenOpts.StructPathTBAA ?
+                          getTBAAScalarTagInfo(TBAAInfo) : TBAAInfo;
+  Fields.push_back(llvm::MDBuilder::TBAAStructField(Offset, Size, TBAATag));
   return true;
 }
 
@@ -263,10 +275,21 @@ CodeGenTBAA::getTBAAStructTypeInfo(QualType QTy) {
     const RecordDecl *RD = TTy->getDecl()->getDefinition();
 
     const ASTRecordLayout &Layout = Context.getASTRecordLayout(RD);
-    SmallVector <std::pair<uint64_t, llvm::MDNode*>, 4> Fields;
+    SmallVector <std::pair<llvm::MDNode*, uint64_t>, 4> Fields;
     unsigned idx = 0;
+    const FieldDecl *LastFD = 0;
+    bool IsMsStruct = RD->isMsStruct(Context);
     for (RecordDecl::field_iterator i = RD->field_begin(),
          e = RD->field_end(); i != e; ++i, ++idx) {
+      if (IsMsStruct) {
+        // Zero-length bitfields following non-bitfield members are ignored.
+        if (Context.ZeroBitfieldFollowsNonBitfield(*i, LastFD)) {
+          --idx;
+          continue;
+        }
+        LastFD = *i;
+      }
+
       QualType FieldQTy = i->getType();
       llvm::MDNode *FieldNode;
       if (isTBAAPathStruct(FieldQTy))
@@ -276,7 +299,7 @@ CodeGenTBAA::getTBAAStructTypeInfo(QualType QTy) {
       if (!FieldNode)
         return StructTypeMetadataCache[Ty] = NULL;
       Fields.push_back(std::make_pair(
-          Layout.getFieldOffset(idx) / Context.getCharWidth(), FieldNode));
+          FieldNode, Layout.getFieldOffset(idx) / Context.getCharWidth()));
     }
 
     // TODO: This is using the RTTI name. Is there a better way to get

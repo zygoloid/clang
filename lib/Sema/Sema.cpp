@@ -590,12 +590,11 @@ void Sema::ActOnEndOfTranslationUnit() {
   }
 
   // Remove file scoped decls that turned out to be used.
-  UnusedFileScopedDecls.erase(std::remove_if(UnusedFileScopedDecls.begin(0,
-                                                                         true),
-                                             UnusedFileScopedDecls.end(),
-                              std::bind1st(std::ptr_fun(ShouldRemoveFromUnused),
-                                           this)),
-                              UnusedFileScopedDecls.end());
+  UnusedFileScopedDecls.erase(
+      std::remove_if(UnusedFileScopedDecls.begin(0, true),
+                     UnusedFileScopedDecls.end(),
+                     std::bind1st(std::ptr_fun(ShouldRemoveFromUnused), this)),
+      UnusedFileScopedDecls.end());
 
   if (TUKind == TU_Prefix) {
     // Translation unit prefixes don't need any of the checking below.
@@ -1316,7 +1315,7 @@ IdentifierInfo *Sema::getSuperIdentifier() const {
 }
 
 void Sema::PushCapturedRegionScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,
-                                   CapturedRegionScopeInfo::CapturedRegionKind K) {
+                                   CapturedRegionKind K) {
   CapturingScopeInfo *CSI = new CapturedRegionScopeInfo(getDiagnostics(),
                                                         S, CD, RD, K);
   CSI->ReturnType = Context.VoidTy;
