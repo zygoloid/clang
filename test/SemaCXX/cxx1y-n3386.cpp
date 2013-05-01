@@ -212,19 +212,18 @@ namespace Templates {
       int (*r)(int) = f; // ok
       g(f<int>);
       g<int>(f); // ok
-      // FIXME: Should this work?
       g(f); // expected-error {{no matching function}}
     }
   }
 
   namespace DeduceInDeducedReturnType {
-    // FIXME: Do we ever need to deduce within a return type which contains a
-    // placeholder?
-    template<typename T> auto f() -> auto (*)(T) {
-      return (int(*)(int))nullptr;
+    template<typename T, typename U> auto f() -> auto (T::*)(U) {
+      int (T::*result)(U) = nullptr;
+      return result;
     }
-    template<typename T> void g(T (*)(int), T *p = 0); // expected-note {{couldn't infer}}
-    void h() { g(f); } // expected-error {{no matching function}}
+    struct S {};
+    int (S::*(*p)())(double) = f;
+    int (S::*(*q)())(double) = f<S, double>;
   }
 }
 

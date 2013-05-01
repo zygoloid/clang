@@ -887,25 +887,14 @@ bool Sema::isSameOrCompatibleFunctionType(CanQualType Param,
   if (!ParamFunction || !ArgFunction)
     return Param == Arg;
 
-  // If the parameter has a deduced return type, just assume that things will
-  // work out. We'll check it actually matches later on.
-  if (getLangOpts().CPlusPlus1y &&
-      ParamFunction->getResultType()->isUndeducedType()) {
-    const FunctionProtoType *ParamFPT = cast<FunctionProtoType>(ParamFunction);
-    ParamFunction = Context.getFunctionType(ArgFunction->getResultType(),
-                                            ParamFPT->getArgTypes(),
-                                            ParamFPT->getExtProtoInfo())
-      ->castAs<FunctionType>();
-  }
-
   // Noreturn adjustment.
   QualType AdjustedParam;
   if (IsNoReturnConversion(Param, Arg, AdjustedParam))
-    return QualType(ArgFunction, 0) == Context.getCanonicalType(AdjustedParam);
+    return Arg == Context.getCanonicalType(AdjustedParam);
 
   // FIXME: Compatible calling conventions.
 
-  return ParamFunction == ArgFunction;
+  return Param == Arg;
 }
 
 /// \brief Deduce the template arguments by comparing the parameter type and
@@ -1374,15 +1363,8 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
         return Sema::TDK_NonDeducedMismatch;
 
       // Check return types.
-      // Delay checking a deduced return type until we've finished deduction
-      // and have decided which specialization we're going to instantiate.
-      bool SkipReturnTypeCheck =
-        S.getLangOpts().CPlusPlus1y &&
-        (TDF & TDF_InOverloadResolution) &&
-        FunctionProtoParam->getResultType()->isUndeducedType();
-      if (!SkipReturnTypeCheck)
-        if (Sema::TemplateDeductionResult Result =
-              DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
+      if (Sema::TemplateDeductionResult Result
+            = DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
                                             FunctionProtoParam->getResultType(),
                                             FunctionProtoArg->getResultType(),
                                             Info, Deduced, 0))
@@ -3413,6 +3395,15 @@ Sema::DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
 
   Deduced.resize(TemplateParams->size());
 
+  // If the function has a deduced return type, substitute it for a dependent
+  // type so that we treat it as a non-deduced context in what follows.
+  bool HasUndeducedReturnType = false;
+  if (getLangOpts().CPlusPlus1y && InOverloadResolution &&
+      Function->getResultType()->isUndeducedType()) {
+    FunctionType = SubstAutoType(FunctionType, Context.DependentTy);
+    HasUndeducedReturnType = true;
+  }
+
   if (!ArgFunctionType.isNull()) {
     unsigned TDF = TDF_TopLevelParameterTypeList;
     if (InOverloadResolution) TDF |= TDF_InOverloadResolution;
@@ -3430,9 +3421,9 @@ Sema::DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                                           Specialization, Info))
     return Result;
 
-  // If the parameter has a deduced return type, we will have delayed all
-  // checking of it until now.
-  if (getLangOpts().CPlusPlus1y && InOverloadResolution &&
+  // If the function has a deduced return type, deduce it now, so we can check
+  // that the deduced function type matches the requested type.
+  if (HasUndeducedReturnType &&
       Specialization->getResultType()->isUndeducedType() &&
       DeduceReturnType(Specialization, Info.getLocation(), false)) {
     Info.FirstArg = TemplateArgument(Specialization, false);
