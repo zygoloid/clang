@@ -26,7 +26,7 @@ public:
   typedef int n;
 };
 struct DD {
-  ~DD() = delete; // expected-note 2{{here}}
+  ~DD() = delete; // expected-note {{here}}
   typedef int n;
 };
 
@@ -41,7 +41,7 @@ decltype(
     PD(), // expected-error {{private destructor}}
     PD()) pd1; // expected-error {{private destructor}}
 decltype(DD(), // expected-error {{deleted function}}
-         DD()) dd1; // expected-error {{deleted function}}
+         DD()) dd1;
 decltype(
     PD(), // expected-error {{temporary of type 'PD' has private destructor}}
     0) pd2;

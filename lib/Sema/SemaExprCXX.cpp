@@ -684,7 +684,8 @@ ExprResult Sema::CheckCXXThrowOperand(SourceLocation ThrowLoc, Expr *E,
   MarkFunctionReferenced(E->getExprLoc(), Destructor);
   CheckDestructorAccess(E->getExprLoc(), Destructor,
                         PDiag(diag::err_access_dtor_exception) << Ty);
-  DiagnoseUseOfDecl(Destructor, E->getExprLoc());
+  if (DiagnoseUseOfDecl(Destructor, E->getExprLoc()))
+    return ExprError();
   return Owned(E);
 }
 
@@ -1431,11 +1432,13 @@ Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
 
   // Mark the new and delete operators as referenced.
   if (OperatorNew) {
-    DiagnoseUseOfDecl(OperatorNew, StartLoc);
+    if (DiagnoseUseOfDecl(OperatorNew, StartLoc))
+      return ExprError();
     MarkFunctionReferenced(StartLoc, OperatorNew);
   }
   if (OperatorDelete) {
-    DiagnoseUseOfDecl(OperatorDelete, StartLoc);
+    if (DiagnoseUseOfDecl(OperatorDelete, StartLoc))
+      return ExprError();
     MarkFunctionReferenced(StartLoc, OperatorDelete);
   }
 
@@ -1451,7 +1454,8 @@ Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
         CheckDestructorAccess(StartLoc, dtor, 
                               PDiag(diag::err_access_dtor)
                                 << BaseAllocType);
-        DiagnoseUseOfDecl(dtor, StartLoc);
+        if (DiagnoseUseOfDecl(dtor, StartLoc))
+          return ExprError();
       }
     }
   }
@@ -2209,7 +2213,8 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
         if (CXXDestructorDecl *Dtor = LookupDestructor(PointeeRD)) {
           MarkFunctionReferenced(StartLoc,
                                     const_cast<CXXDestructorDecl*>(Dtor));
-          DiagnoseUseOfDecl(Dtor, StartLoc);
+          if (DiagnoseUseOfDecl(Dtor, StartLoc))
+            return ExprError();
         }
 
       // C++ [expr.delete]p3:
@@ -4825,7 +4830,8 @@ ExprResult Sema::MaybeBindToTemporary(Expr *E) {
     CheckDestructorAccess(E->getExprLoc(), Destructor,
                           PDiag(diag::err_access_dtor_temp)
                             << E->getType());
-    DiagnoseUseOfDecl(Destructor, E->getExprLoc());
+    if (DiagnoseUseOfDecl(Destructor, E->getExprLoc()))
+      return ExprError();
 
     // If destructor is trivial, we can avoid the extra copy.
     if (Destructor->isTrivial())
@@ -4980,7 +4986,8 @@ ExprResult Sema::ActOnDecltypeExpression(Expr *E) {
     CheckDestructorAccess(Bind->getExprLoc(), Destructor,
                           PDiag(diag::err_access_dtor_temp)
                             << Bind->getType());
-    DiagnoseUseOfDecl(Destructor, Bind->getExprLoc());
+    if (DiagnoseUseOfDecl(Destructor, Bind->getExprLoc()))
+      return ExprError();
 
     // We need a cleanup, but we don't need to remember the temporary.
     ExprNeedsCleanups = true;

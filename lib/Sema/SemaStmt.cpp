@@ -2542,16 +2542,6 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   if (isa<CapturingScopeInfo>(getCurFunction()))
     return ActOnCapScopeReturnStmt(ReturnLoc, RetValExp);
 
-  // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
-  // deduction.
-  if (getLangOpts().CPlusPlus1y && !CurContext->isDependentContext())
-    if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CurContext))
-      if (AutoType *AT = FD->getResultType()->getContainedAutoType())
-        if (DeduceFunctionTypeFromReturnExpr(FD, ReturnLoc, RetValExp, AT)) {
-          FD->setInvalidDecl();
-          return StmtError();
-        }
-
   QualType FnRetType;
   QualType RelatedRetType;
   if (const FunctionDecl *FD = getCurFunctionDecl()) {
@@ -2570,6 +2560,23 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
     }
   } else // If we don't have a function/method context, bail.
     return StmtError();
+
+  // FIXME: Add a flag to the ScopeInfo to indicate whether we're performing
+  // deduction.
+  bool HasDependentReturnType = FnRetType->isDependentType();
+  if (getLangOpts().CPlusPlus1y) {
+    if (AutoType *AT = FnRetType->getContainedAutoType()) {
+      FunctionDecl *FD = cast<FunctionDecl>(CurContext);
+      if (CurContext->isDependentContext())
+        HasDependentReturnType = true;
+      else if (DeduceFunctionTypeFromReturnExpr(FD, ReturnLoc, RetValExp, AT)) {
+        FD->setInvalidDecl();
+        return StmtError();
+      } else {
+        FnRetType = FD->getResultType();
+      }
+    }
+  }
 
   ReturnStmt *Result = 0;
   if (FnRetType->isVoidType()) {
@@ -2636,7 +2643,7 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
     }
 
     Result = new (Context) ReturnStmt(ReturnLoc, RetValExp, 0);
-  } else if (!RetValExp && !FnRetType->isDependentType()) {
+  } else if (!RetValExp && !HasDependentReturnType) {
     unsigned DiagID = diag::warn_return_missing_expr;  // C90 6.6.6.4p4
     // C99 6.8.6.4p1 (ext_ since GCC warns)
     if (getLangOpts().C99) DiagID = diag::ext_return_missing_expr;
@@ -2647,9 +2654,9 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
       Diag(ReturnLoc, DiagID) << getCurMethodDecl()->getDeclName() << 1/*meth*/;
     Result = new (Context) ReturnStmt(ReturnLoc);
   } else {
-    assert(RetValExp || FnRetType->isDependentType());
+    assert(RetValExp || HasDependentReturnType);
     const VarDecl *NRVOCandidate = 0;
-    if (!FnRetType->isDependentType() && !RetValExp->isTypeDependent()) {
+    if (!HasDependentReturnType && !RetValExp->isTypeDependent()) {
       // we have a non-void function with an expression, continue checking
 
       QualType RetType = (RelatedRetType.isNull() ? FnRetType : RelatedRetType);

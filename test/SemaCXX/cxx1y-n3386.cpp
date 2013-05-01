@@ -9,10 +9,35 @@ auto g() -> auto &;
 auto h() -> auto *;
 auto *h();
 
-struct S {
-  // n3386 permits this, but it conflicts with another popular extension.
-  operator auto(); // expected-error {{'auto' not allowed here}}
+struct Conv1 {
+  operator auto();
+} conv1;
+int conv1a = conv1; // expected-error {{something}}
+Conv1::operator auto() { return 123; }
+int conv1b = conv1;
+int conv1c = conv1.operator auto();
+int conv1d = conv1.operator int(); // expected-error {{no member named 'operator int'}}
+
+struct Conv2 {
+  operator auto() { return 0; }  // expected-note {{previous}}
+  operator auto() { return 0.; } // expected-error {{cannot be redeclared}} expected-error {{redefinition of 'operator auto'}}
 };
+
+struct Conv3 {
+  operator auto() { int *p = nullptr; return p; }  // expected-note {{candidate}}
+  operator auto*() { int *p = nullptr; return p; } // expected-note {{candidate}}
+} conv3;
+int *conv3a = conv3; // expected-error {{ambiguous}}
+int *conv3b = conv3.operator auto();
+int *conv3c = conv3.operator auto*();
+
+template<typename T>
+struct Conv4 {
+  operator auto() { return T(); }
+};
+Conv4<int> conv4int;
+int conv4a = conv4int;
+int conv4b = conv4int.operator auto();
 
 auto a();
 auto a() { return 0; }
@@ -116,9 +141,12 @@ namespace Templates {
 
   extern template auto fwd_decl<double>();
   int k1 = fwd_decl<double>(); // expected-error {{cannot be used before it is defined}}
-  // FIXME: what is the right behavior here?
-  extern template int fwd_decl<char>();
+  extern template int fwd_decl<char>(); // expected-error {{does not refer to a function template}}
   int k2 = fwd_decl<char>();
+
+  template<typename T> auto instantiate() { T::error; } // expected-note {{declared here}}
+  extern template auto instantiate<int>(); // ok
+  int k = instantiate<int>(); // expected-error {{cannot be used before it is defined}}
 }
 
 auto fwd_decl_using();
