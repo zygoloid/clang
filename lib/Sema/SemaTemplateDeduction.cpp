@@ -887,14 +887,25 @@ bool Sema::isSameOrCompatibleFunctionType(CanQualType Param,
   if (!ParamFunction || !ArgFunction)
     return Param == Arg;
 
+  // If the parameter has a deduced return type, just assume that things will
+  // work out. We'll check it actually matches later on.
+  if (getLangOpts().CPlusPlus1y &&
+      ParamFunction->getResultType()->isUndeducedType()) {
+    const FunctionProtoType *ParamFPT = cast<FunctionProtoType>(ParamFunction);
+    ParamFunction = Context.getFunctionType(ArgFunction->getResultType(),
+                                            ParamFPT->getArgTypes(),
+                                            ParamFPT->getExtProtoInfo())
+      ->castAs<FunctionType>();
+  }
+
   // Noreturn adjustment.
   QualType AdjustedParam;
   if (IsNoReturnConversion(Param, Arg, AdjustedParam))
-    return Arg == Context.getCanonicalType(AdjustedParam);
+    return QualType(ArgFunction, 0) == Context.getCanonicalType(AdjustedParam);
 
   // FIXME: Compatible calling conventions.
 
-  return Param == Arg;
+  return ParamFunction == ArgFunction;
 }
 
 /// \brief Deduce the template arguments by comparing the parameter type and
@@ -1363,12 +1374,19 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
         return Sema::TDK_NonDeducedMismatch;
 
       // Check return types.
-      if (Sema::TemplateDeductionResult Result
-            = DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
+      // Delay checking a deduced return type until we've finished deduction
+      // and have decided which specialization we're going to instantiate.
+      bool SkipReturnTypeCheck =
+        S.getLangOpts().CPlusPlus1y &&
+        (TDF & TDF_InOverloadResolution) &&
+        FunctionProtoParam->getResultType()->isUndeducedType();
+      if (!SkipReturnTypeCheck)
+        if (Sema::TemplateDeductionResult Result =
+              DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
                                             FunctionProtoParam->getResultType(),
                                             FunctionProtoArg->getResultType(),
                                             Info, Deduced, 0))
-        return Result;
+          return Result;
 
       return DeduceTemplateArguments(S, TemplateParams,
                                      FunctionProtoParam->arg_type_begin(),
@@ -2804,21 +2822,25 @@ Sema::FinishTemplateArgumentDeduction(FunctionTemplateDecl *FunctionTemplate,
 
 /// Gets the type of a function for template-argument-deducton
 /// purposes when it's considered as part of an overload set.
-static QualType GetTypeOfFunction(ASTContext &Context,
-                                  const OverloadExpr::FindResult &R,
+static QualType GetTypeOfFunction(Sema &S, const OverloadExpr::FindResult &R,
                                   FunctionDecl *Fn) {
+  // We may need to deduce the return type of the function now.
+  if (S.getLangOpts().CPlusPlus1y && Fn->getResultType()->isUndeducedType() &&
+      S.DeduceReturnType(Fn, R.Expression->getExprLoc(), /*Diagnose*/false))
+    return QualType();
+
   if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Fn))
     if (Method->isInstance()) {
       // An instance method that's referenced in a form that doesn't
       // look like a member pointer is just invalid.
       if (!R.HasFormOfMemberPointer) return QualType();
 
-      return Context.getMemberPointerType(Fn->getType(),
-               Context.getTypeDeclType(Method->getParent()).getTypePtr());
+      return S.Context.getMemberPointerType(Fn->getType(),
+               S.Context.getTypeDeclType(Method->getParent()).getTypePtr());
     }
 
   if (!R.IsAddressOfOperand) return Fn->getType();
-  return Context.getPointerType(Fn->getType());
+  return S.Context.getPointerType(Fn->getType());
 }
 
 /// Apply the deduction rules for overload sets.
@@ -2852,7 +2874,7 @@ ResolveOverloadForDeduction(Sema &S, TemplateParameterList *TemplateParams,
       // But we can still look for an explicit specialization.
       if (FunctionDecl *ExplicitSpec
             = S.ResolveSingleFunctionTemplateSpecialization(Ovl))
-        return GetTypeOfFunction(S.Context, R, ExplicitSpec);
+        return GetTypeOfFunction(S, R, ExplicitSpec);
     }
 
     return QualType();
@@ -2885,7 +2907,7 @@ ResolveOverloadForDeduction(Sema &S, TemplateParameterList *TemplateParams,
     }
 
     FunctionDecl *Fn = cast<FunctionDecl>(D);
-    QualType ArgType = GetTypeOfFunction(S.Context, R, Fn);
+    QualType ArgType = GetTypeOfFunction(S, R, Fn);
     if (ArgType.isNull()) continue;
 
     // Function-to-pointer conversion.
@@ -3408,6 +3430,15 @@ Sema::DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                                           Specialization, Info))
     return Result;
 
+  // If the parameter has a deduced return type, we will have delayed all
+  // checking of it until now.
+  if (getLangOpts().CPlusPlus1y && InOverloadResolution &&
+      Specialization->getResultType()->isUndeducedType() &&
+      DeduceReturnType(Specialization, Info.getLocation(), false)) {
+    Info.FirstArg = TemplateArgument(Specialization, false);
+    return TDK_UnknownDeducedReturnType;
+  }
+
   // If the requested function type does not match the actual type of the
   // specialization with respect to arguments of compatible pointer to function
   // types, template argument deduction fails.
@@ -3743,6 +3774,22 @@ void Sema::DiagnoseAutoDeductionFailure(VarDecl *VDecl, Expr *Init) {
     Diag(VDecl->getLocation(), diag::err_auto_var_deduction_failure)
       << VDecl->getDeclName() << VDecl->getType() << Init->getType()
       << Init->getSourceRange();
+}
+
+bool Sema::DeduceReturnType(FunctionDecl *FD, SourceLocation Loc,
+                            bool Diagnose) {
+  assert(FD->getResultType()->isUndeducedType());
+
+  if (FD->getTemplateInstantiationPattern())
+    InstantiateFunctionDefinition(Loc, FD);
+
+  bool StillUndeduced = FD->getResultType()->isUndeducedType();
+  if (StillUndeduced && Diagnose) {
+    Diag(Loc, diag::err_auto_fn_used_before_defined) << FD;
+    Diag(FD->getLocation(), diag::note_callee_decl) << FD;
+  }
+
+  return StillUndeduced;
 }
 
 static void

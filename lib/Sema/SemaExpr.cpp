@@ -281,20 +281,11 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, SourceLocation Loc,
       return true;
     }
 
-    if (getLangOpts().CPlusPlus1y) {
-      // Instantiate a function template whenever it is referenced if it
-      // has a deduced return type.
-      if (FD->getResultType()->isUndeducedType()) {
-        if (FD->getTemplateInstantiationPattern())
-          InstantiateFunctionDefinition(Loc, FD);
-
-        if (FD->getResultType()->isUndeducedType()) {
-          Diag(Loc, diag::err_auto_fn_used_before_defined) << D;
-          Diag(D->getLocation(), diag::note_callee_decl) << D;
-          return true;
-        }
-      }
-    }
+    // If the function has a deduced return type, and we can't deduce it,
+    // then we can't use it either.
+    if (getLangOpts().CPlusPlus1y && FD->getResultType()->isUndeducedType() &&
+        DeduceReturnType(FD, Loc))
+      return true;
   }
   DiagnoseAvailabilityOfDecl(*this, D, Loc, UnknownObjCClass);
 

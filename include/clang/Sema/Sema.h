@@ -5568,6 +5568,9 @@ public:
     /// \brief The arguments included an overloaded function name that could
     /// not be resolved to a suitable function.
     TDK_FailedOverloadResolution,
+    /// \brief The arguments included an overloaded function with a deduced
+    /// return type that could not be resolved.
+    TDK_UnknownDeducedReturnType,
     /// \brief Deduction failed; that's all we know.
     TDK_MiscellaneousDeductionFailure
   };
@@ -5648,6 +5651,8 @@ public:
                                   QualType &Result);
   QualType SubstAutoType(QualType TypeWithAuto, QualType Replacement);
   void DiagnoseAutoDeductionFailure(VarDecl *VDecl, Expr *Init);
+  bool DeduceReturnType(FunctionDecl *FD, SourceLocation Loc,
+                        bool Diagnose = true);
 
   bool DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
                                         SourceLocation ReturnLoc,

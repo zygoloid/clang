@@ -611,6 +611,10 @@ static MakeDeductionFailureInfo(ASTContext &Context,
     Result.Data = Info.Expression;
     break;
 
+  case Sema::TDK_UnknownDeducedReturnType:
+    Result.Data = cast<FunctionDecl>(Info.FirstArg.getAsDecl());
+    break;
+
   case Sema::TDK_MiscellaneousDeductionFailure:
     break;
   }
@@ -628,6 +632,7 @@ void OverloadCandidate::DeductionFailureInfo::Destroy() {
   case Sema::TDK_TooFewArguments:
   case Sema::TDK_InvalidExplicitArguments:
   case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_UnknownDeducedReturnType:
     break;
 
   case Sema::TDK_Inconsistent:
@@ -670,6 +675,7 @@ OverloadCandidate::DeductionFailureInfo::getTemplateParameter() {
   case Sema::TDK_SubstitutionFailure:
   case Sema::TDK_NonDeducedMismatch:
   case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_UnknownDeducedReturnType:
     return TemplateParameter();
 
   case Sema::TDK_Incomplete:
@@ -702,6 +708,7 @@ OverloadCandidate::DeductionFailureInfo::getTemplateArgumentList() {
   case Sema::TDK_Underqualified:
   case Sema::TDK_NonDeducedMismatch:
   case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_UnknownDeducedReturnType:
     return 0;
 
   case Sema::TDK_SubstitutionFailure:
@@ -726,6 +733,7 @@ const TemplateArgument *OverloadCandidate::DeductionFailureInfo::getFirstArg() {
   case Sema::TDK_InvalidExplicitArguments:
   case Sema::TDK_SubstitutionFailure:
   case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_UnknownDeducedReturnType:
     return 0;
 
   case Sema::TDK_Inconsistent:
@@ -753,6 +761,7 @@ OverloadCandidate::DeductionFailureInfo::getSecondArg() {
   case Sema::TDK_InvalidExplicitArguments:
   case Sema::TDK_SubstitutionFailure:
   case Sema::TDK_FailedOverloadResolution:
+  case Sema::TDK_UnknownDeducedReturnType:
     return 0;
 
   case Sema::TDK_Inconsistent:
@@ -773,6 +782,15 @@ OverloadCandidate::DeductionFailureInfo::getExpr() {
   if (static_cast<Sema::TemplateDeductionResult>(Result) ==
         Sema::TDK_FailedOverloadResolution)
     return static_cast<Expr*>(Data);
+
+  return 0;
+}
+
+FunctionDecl *
+OverloadCandidate::DeductionFailureInfo::getFunctionDecl() {
+  if (static_cast<Sema::TemplateDeductionResult>(Result) ==
+        Sema::TDK_UnknownDeducedReturnType)
+    return static_cast<FunctionDecl*>(Data);
 
   return 0;
 }
@@ -5726,6 +5744,14 @@ Sema::AddConversionCandidate(CXXConversionDecl *Conversion,
   if (!CandidateSet.isNewCandidate(Conversion))
     return;
 
+  // If the conversion function has an undeduced return type, trigger its
+  // deduction now.
+  if (getLangOpts().CPlusPlus1y && ConvType->isUndeducedType()) {
+    if (DeduceReturnType(Conversion, From->getExprLoc()))
+      return;
+    ConvType = Conversion->getConversionType().getNonReferenceType();
+  }
+
   // Overload resolution is always an unevaluated context.
   EnterExpressionEvaluationContext Unevaluated(*this, Sema::Unevaluated);
 
@@ -8545,6 +8571,13 @@ void DiagnoseBadDeduction(Sema &S, OverloadCandidate *Cand,
       << FirstTA << SecondTA;
     return;
   }
+
+  case Sema::TDK_UnknownDeducedReturnType:
+    S.Diag(Fn->getLocation(),
+           diag::note_ovl_candidate_auto_fn_non_deduced_return)
+      << Cand->DeductionFailure.getFunctionDecl();
+    return;
+
   // TODO: diagnose these individually, then kill off
   // note_ovl_candidate_bad_deduction, which is uselessly vague.
   case Sema::TDK_MiscellaneousDeductionFailure:
@@ -8717,6 +8750,7 @@ RankDeductionFailure(const OverloadCandidate::DeductionFailureInfo &DFI) {
 
   case Sema::TDK_Invalid:
   case Sema::TDK_Incomplete:
+  case Sema::TDK_UnknownDeducedReturnType:
     return 1;
 
   case Sema::TDK_Underqualified:
@@ -9173,6 +9207,13 @@ private:
           if (S.CheckCUDATarget(Caller, FunDecl))
             return false;
 
+      // If any candidate has a placeholder return type, trigger its deduction
+      // now.
+      if (S.getLangOpts().CPlusPlus1y &&
+          FunDecl->getResultType()->isUndeducedType() &&
+          S.DeduceReturnType(FunDecl, SourceExpr->getLocStart(), Complain))
+        return false;
+
       QualType ResultTy;
       if (Context.hasSameUnqualifiedType(TargetFunctionType, 
                                          FunDecl->getType()) ||
@@ -9438,6 +9479,11 @@ Sema::ResolveSingleFunctionTemplateSpecialization(OverloadExpr *ovl,
     Matched = Specialization;
     if (FoundResult) *FoundResult = I.getPair();    
   }
+
+  if (Matched && getLangOpts().CPlusPlus1y &&
+      Matched->getResultType()->isUndeducedType() &&
+      DeduceReturnType(Matched, ovl->getExprLoc(), Complain))
+    return 0;
 
   return Matched;
 }

@@ -10,16 +10,17 @@ auto h() -> auto *;
 auto *h();
 
 struct Conv1 {
-  operator auto();
+  operator auto(); // expected-note {{declared here}}
 } conv1;
-int conv1a = conv1; // expected-error {{something}}
+int conv1a = conv1; // expected-error {{function 'operator auto' with deduced return type cannot be used before it is defined}}
+// expected-error@-1 {{no viable conversion}}
 Conv1::operator auto() { return 123; }
 int conv1b = conv1;
 int conv1c = conv1.operator auto();
 int conv1d = conv1.operator int(); // expected-error {{no member named 'operator int'}}
 
 struct Conv2 {
-  operator auto() { return 0; }  // expected-note {{previous}}
+  operator auto() { return 0; }  // expected-note 2{{previous}}
   operator auto() { return 0.; } // expected-error {{cannot be redeclared}} expected-error {{redefinition of 'operator auto'}}
 };
 
@@ -140,6 +141,8 @@ namespace Templates {
   typedef float dbl; // expected-error {{typedef redefinition with different types ('float' vs 'decltype(f2(1.2))' (aka 'double &'))}}
 
   extern template auto fwd_decl<double>();
+  // FIXME: This is supposed to be OK. We still instantiate this function to get
+  // its return type.
   int k1 = fwd_decl<double>(); // expected-error {{cannot be used before it is defined}}
   extern template int fwd_decl<char>(); // expected-error {{does not refer to a function template}}
   int k2 = fwd_decl<char>();
@@ -147,6 +150,82 @@ namespace Templates {
   template<typename T> auto instantiate() { T::error; } // expected-note {{declared here}}
   extern template auto instantiate<int>(); // ok
   int k = instantiate<int>(); // expected-error {{cannot be used before it is defined}}
+  template<> auto instantiate<char>() {} // ok
+  template<> void instantiate<double>() {} // expected-error {{no function template matches}}
+
+  template<typename T> auto arg_single() { return 0; }
+  template<typename T> auto arg_multi() { return 0l; }
+  template<typename T> auto arg_multi(int) { return "bad"; }
+  template<typename T> struct Outer {
+    static auto arg_single() { return 0.f; }
+    static auto arg_multi() { return 0.; }
+    static auto arg_multi(int) { return "bad"; }
+  };
+  template<typename T> T &take_fn(T (*p)());
+
+  int &check1 = take_fn(arg_single); // expected-error {{no matching}} expected-note@-2 {{couldn't infer}}
+  int &check2 = take_fn(arg_single<int>);
+  int &check3 = take_fn<int>(arg_single); // expected-error {{no matching}} expected-note@-4{{no overload of 'arg_single'}}
+  int &check4 = take_fn<int>(arg_single<int>);
+  long &check5 = take_fn(arg_multi); // expected-error {{no matching}} expected-note@-6 {{couldn't infer}}
+  long &check6 = take_fn(arg_multi<int>);
+  long &check7 = take_fn<long>(arg_multi); // expected-error {{no matching}} expected-note@-8{{no overload of 'arg_multi'}}
+  long &check8 = take_fn<long>(arg_multi<int>);
+
+  float &mem_check1 = take_fn(Outer<int>::arg_single);
+  float &mem_check2 = take_fn<float>(Outer<char>::arg_single);
+  double &mem_check3 = take_fn(Outer<long>::arg_multi);
+  double &mem_check4 = take_fn<double>(Outer<double>::arg_multi);
+
+  namespace Deduce1 {
+    template<typename T> auto f() { return 0; } // expected-note {{candidate}}
+    template<typename T> void g(T(*)()); // expected-note 2{{candidate}}
+    void h() {
+      auto p = f<int>;
+      auto (*q)() = f<int>;
+      int (*r)() = f; // expected-error {{does not match}}
+      g(f<int>);
+      g<int>(f); // expected-error {{no matching function}}
+      g(f); // expected-error {{no matching function}}
+    }
+  }
+
+  namespace Deduce2 {
+    template<typename T> auto f(int) { return 0; } // expected-note {{candidate}}
+    template<typename T> void g(T(*)(int)); // expected-note 2{{candidate}}
+    void h() {
+      auto p = f<int>;
+      auto (*q)(int) = f<int>;
+      int (*r)(int) = f; // expected-error {{does not match}}
+      g(f<int>);
+      g<int>(f); // expected-error {{no matching function}}
+      g(f); // expected-error {{no matching function}}
+    }
+  }
+
+  namespace Deduce3 {
+    template<typename T> auto f(T) { return 0; }
+    template<typename T> void g(T(*)(int)); // expected-note {{couldn't infer}}
+    void h() {
+      auto p = f<int>;
+      auto (*q)(int) = f<int>;
+      int (*r)(int) = f; // ok
+      g(f<int>);
+      g<int>(f); // ok
+      // FIXME: Should this work?
+      g(f); // expected-error {{no matching function}}
+    }
+  }
+
+  namespace DeduceInDeducedReturnType {
+    // FIXME: Do we ever need to deduce within a return type which contains a
+    // placeholder?
+    template<typename T> auto f() -> auto (*)(T) {
+      return (int(*)(int))nullptr;
+    }
+    template<typename T> void g(T (*)(int), T *p = 0); // expected-note {{couldn't infer}}
+    void h() { g(f); } // expected-error {{no matching function}}
+  }
 }
 
 auto fwd_decl_using();

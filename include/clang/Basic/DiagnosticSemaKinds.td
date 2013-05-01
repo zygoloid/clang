@@ -2460,6 +2460,9 @@ def note_ovl_candidate_non_deduced_mismatch : Note<
 // can handle that case properly.
 def note_ovl_candidate_non_deduced_mismatch_qualified : Note<
     "candidate template ignored: could not match %q0 against %q1">;
+def note_ovl_candidate_auto_fn_non_deduced_return : Note<
+    "candidate template ignored: function %0 with deduced return type used "
+    "but not defined">;
     
 // Note that we don't treat templates differently for this diagnostic.
 def note_ovl_candidate_arity : Note<"candidate "

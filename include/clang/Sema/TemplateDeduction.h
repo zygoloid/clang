@@ -143,6 +143,9 @@ public:
   ///
   ///   TDK_NonDeducedMismatch: this is the component of the 'parameter'
   ///   of the deduction, directly provided in the source code.
+  ///
+  ///   TDK_UnknownDeducedReturnType: this is the function which had
+  ///   a placeholder in its return type which couldn't be deduced.
   TemplateArgument FirstArg;
 
   /// \brief The second template argument to which the template
@@ -157,8 +160,8 @@ public:
   /// \brief The expression which caused a deduction failure.
   ///
   ///   TDK_FailedOverloadResolution: this argument is the reference to
-  //    an overloaded function which could not be resolved to a specific
-  //    function.
+  ///   an overloaded function which could not be resolved to a specific
+  ///   function.
   Expr *Expression;
 };
 
