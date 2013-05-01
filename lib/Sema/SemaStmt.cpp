@@ -2487,8 +2487,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
                                             SourceLocation ReturnLoc,
                                             Expr *&RetExpr,
                                             AutoType *AT) {
-  QualType OrigResultType = FD->getTypeSourceInfo()->getType()->
-    castAs<FunctionProtoType>()->getResultType();
+  TypeLoc OrigResultType = FD->getTypeSourceInfo()->getTypeLoc().
+    IgnoreParens().castAs<FunctionProtoTypeLoc>().getResultLoc();
   QualType Deduced;
 
   if (RetExpr) {
@@ -2498,21 +2498,21 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
       if (isa<InitListExpr>(RetExpr))
         Diag(RetExpr->getExprLoc(),
              diag::err_auto_fn_deduction_failure_from_init_list)
-          << OrigResultType;
+          << OrigResultType.getType();
       else
         Diag(RetExpr->getExprLoc(), diag::err_auto_fn_deduction_failure)
-          << OrigResultType << RetExpr->getType();
+          << OrigResultType.getType() << RetExpr->getType();
     }
 
     if (DAR != DAR_Succeeded)
       return true;
   } else {
-    if (!OrigResultType->getAs<AutoType>()) {
+    if (!OrigResultType.getType()->getAs<AutoType>()) {
       Diag(ReturnLoc, diag::err_auto_fn_return_void_but_not_auto)
-        << OrigResultType;
+        << OrigResultType.getType();
       return true;
     }
-    Deduced = SubstAutoType(OrigResultType, Context.VoidTy);
+    Deduced = SubstAutoType(OrigResultType.getType(), Context.VoidTy);
     if (Deduced.isNull())
       return true;
   }

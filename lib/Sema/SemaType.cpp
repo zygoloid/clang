@@ -2106,13 +2106,16 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
     case Declarator::AliasTemplateContext:
       Error = 10; // Type alias
       break;
-    case Declarator::ConversionIdContext:
     case Declarator::TrailingReturnContext:
       if (!SemaRef.getLangOpts().CPlusPlus1y)
         Error = 11; // Function return type
       break;
+    case Declarator::ConversionIdContext:
+      if (!SemaRef.getLangOpts().CPlusPlus1y)
+        Error = 12; // conversion-type-id
+      break;
     case Declarator::TypeNameContext:
-      Error = 12; // Generic
+      Error = 13; // Generic
       break;
     case Declarator::FileContext:
     case Declarator::BlockContext:
