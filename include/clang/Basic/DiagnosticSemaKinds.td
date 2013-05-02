@@ -1476,7 +1476,7 @@ def err_decltype_auto_compound_type : Error<
 def err_decltype_auto_initializer_list : Error<
   "cannot deduce 'decltype(auto)' from initializer list">;
 
-// C++1y auto type
+// C++1y deduced return types
 def err_auto_fn_deduction_failure : Error<
   "cannot deduce return type %0 from returned value of type %1">;
 def err_auto_fn_deduction_failure_from_init_list : Error<

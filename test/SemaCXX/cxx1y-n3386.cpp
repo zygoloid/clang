@@ -231,3 +231,40 @@ auto fwd_decl_using();
 namespace N { using ::fwd_decl_using; }
 auto fwd_decl_using() { return 0; }
 namespace N { int k = N::fwd_decl_using(); }
+
+namespace OverloadResolutionNonTemplate {
+  auto f();
+  auto f(int); // expected-note {{here}}
+
+  int &g(int (*f)()); // expected-note {{not viable: no overload of 'f' matching 'int (*)()'}}
+  char &g(int (*f)(int)); // expected-note {{not viable: no overload of 'f' matching 'int (*)(int)'}}
+
+  int a = g(f); // expected-error {{no matching function}}
+
+  auto f() { return 0; }
+
+  // FIXME: It's not completely clear whether this should be ill-formed.
+  int &b = g(f); // expected-error {{used before it is defined}}
+
+  auto f(int) { return 0.0; }
+
+  int &c = g(f); // ok
+}
+
+namespace OverloadResolutionTemplate {
+  auto f();
+  template<typename T> auto f(T);
+
+  int &g(int (*f)()); // expected-note {{not viable: no overload of 'f' matching 'int (*)()'}} expected-note {{candidate}}
+  char &g(int (*f)(int)); // expected-note {{not viable: no overload of 'f' matching 'int (*)(int)'}} expected-note {{candidate}}
+
+  int a = g(f); // expected-error {{no matching function}}
+
+  auto f() { return 0; }
+
+  int &b = g(f); // ok (presumably), due to deduction failure forming type of 'f<int>'
+
+  template<typename T> auto f(T) { return 0; }
+
+  int &c = g(f); // expected-error {{ambiguous}}
+}
